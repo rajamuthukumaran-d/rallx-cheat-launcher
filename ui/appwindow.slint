@@ -1,0 +1,74 @@
+import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "Rallx Cheat Launcher";
+    width: 800px;
+    height: 600px;
+    background: #121214;
+
+    in-out property <string> status-text: "No trainer folder configured";
+    in-out property <bool> is-settings-open: false;
+
+    callback close-clicked();
+    callback launch-trainer(string);
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 16px;
+
+        HorizontalBox {
+            alignment: space-between;
+            Text {
+                text: "Rallx Cheat Launcher";
+                font-size: 24px;
+                color: #ffffff;
+                font-weight: 700;
+            }
+            Button {
+                text: root.is-settings-open ? "Back to Home" : "Settings";
+                clicked => {
+                    root.is-settings-open = !root.is-settings-open;
+                }
+            }
+        }
+
+        Text {
+            text: root.status-text;
+            color: #8a8a93;
+            font-size: 14px;
+        }
+
+        if !root.is-settings-open : VerticalBox {
+            spacing: 12px;
+            Text {
+                text: "Available Trainers";
+                color: #ffffff;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            ScrollView {
+                Text {
+                    text: "No trainers found. Go to Settings to configure a trainer folder.";
+                    color: #52525b;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        if root.is-settings-open : VerticalBox {
+            spacing: 12px;
+            Text {
+                text: "Settings";
+                color: #ffffff;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            Text {
+                text: "Trainer Folder Selection (Configuration will be loaded/saved here)";
+                color: #8a8a93;
+                font-size: 14px;
+            }
+            // Future configuration settings inputs can go here
+        }
+    }
+}
