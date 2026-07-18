@@ -41,7 +41,6 @@ export component HomeScreen inherits Rectangle {
                 padding-left: 28px;
                 padding-right: 28px;
                 spacing: 18px;
-                alignment: start;
                 cross-axis-alignment: center;
 
                 Rectangle {
@@ -68,19 +67,22 @@ export component HomeScreen inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                if root.show-search: Rectangle {
+                Rectangle {
+                    // Always present (never conditional) so its stretch
+                    // factor reliably claims the leftover header width,
+                    // pushing everything after it to the right edge; only
+                    // its contents/styling swap based on show-search.
                     horizontal-stretch: 1;
                     height: 44px;
-                    background: Theme.panel2;
-                    border-width: 1px;
+                    background: root.show-search ? Theme.panel2 : transparent;
+                    border-width: root.show-search ? 1px : 0px;
                     border-color: Theme.accent;
                     border-radius: 8px;
 
-                    HorizontalLayout {
+                    if root.show-search: HorizontalLayout {
                         padding-left: 14px;
                         padding-right: 14px;
                         spacing: 10px;
-                        alignment: start;
                         cross-axis-alignment: center;
 
                         Image {
@@ -118,8 +120,6 @@ export component HomeScreen inherits Rectangle {
                         }
                     }
                 }
-
-                if !root.show-search: Rectangle { horizontal-stretch: 1; }
 
                 if !root.show-search: IconButton {
                     icon: @image-url("../../assets/images/icons/search.svg");
