@@ -10,7 +10,6 @@ export component HomeScreen inherits Rectangle {
     in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
-    in-out property <bool> close-after-launch: true;
 
     in property <[TrainerItem]> visible-trainers;
     in property <int> trainer-count;
@@ -153,54 +152,6 @@ export component HomeScreen inherits Rectangle {
                         }
                         ToggleSwitch {
                             checked <=> root.edit-mode;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    background: Theme.panel2;
-                    border-radius: 8px;
-                    width: close-chip.min-width;
-                    height: close-chip.min-height;
-
-                    close-chip := HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        padding-top: 8px;
-                        padding-bottom: 8px;
-                        spacing: 8px;
-                        cross-axis-alignment: center;
-
-                        checkbox-touch := TouchArea {
-                            width: 17px;
-                            height: 17px;
-                            clicked => { root.close-after-launch = !root.close-after-launch; }
-
-                            Rectangle {
-                                width: 17px;
-                                height: 17px;
-                                border-radius: 4px;
-                                background: root.close-after-launch ? Theme.accent : transparent;
-                                border-width: 1.5px;
-                                border-color: root.close-after-launch ? Theme.accent : Theme.text-dim;
-
-                                if root.close-after-launch: Image {
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    source: @image-url("../../assets/images/icons/check.svg");
-                                    width: 11px;
-                                    height: 11px;
-                                    colorize: Theme.on-accent;
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: "Close after launch";
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            font-weight: 500;
-                            vertical-alignment: center;
                         }
                     }
                 }
