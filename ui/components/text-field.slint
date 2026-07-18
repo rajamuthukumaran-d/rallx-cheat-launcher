@@ -1,0 +1,49 @@
+import { Theme } from "../theme.slint";
+
+// Thin Rectangle + TextInput wrapper matching the mockup's dark form-field styling.
+// (std-widgets' LineEdit pulls in the platform style's own palette, which would
+// fight the app's custom dark/light theme, so this wraps the builtin TextInput directly.)
+export component TextField inherits Rectangle {
+    in-out property <string> text: "";
+    in property <string> placeholder: "";
+    in property <length> field-font-size: 16px;
+    in property <length> pad-h: 14px;
+    in property <bool> read-only: false;
+    callback edited();
+    callback accepted();
+
+    height: 44px;
+    background: Theme.panel2;
+    border-width: 1px;
+    border-color: Theme.border;
+    border-radius: 8px;
+
+    Text {
+        x: pad-h;
+        width: parent.width - pad-h * 2;
+        height: 100%;
+        vertical-alignment: center;
+        text: root.placeholder;
+        color: Theme.text-dim;
+        font-size: field-font-size;
+        visible: root.text.is-empty;
+    }
+
+    input := TextInput {
+        x: pad-h;
+        width: parent.width - pad-h * 2;
+        height: 100%;
+        vertical-alignment: center;
+        single-line: true;
+        text <=> root.text;
+        color: Theme.text;
+        font-size: field-font-size;
+        read-only: root.read-only;
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+    }
+
+    TouchArea {
+        clicked => { input.focus(); }
+    }
+}

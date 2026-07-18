@@ -1,0 +1,36 @@
+import { Theme } from "../theme.slint";
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <length> icon-size: 18px;
+    in property <length> button-size: 40px;
+    in property <brush> icon-color: Theme.text;
+    in property <brush> button-bg: Theme.panel2;
+    in property <brush> button-border: Theme.border;
+    in property <bool> bordered: true;
+    in property <string> tooltip-text;
+
+    width: button-size;
+    height: button-size;
+    border-radius: 8px;
+    background: button-bg;
+    border-width: bordered ? 1px : 0px;
+    border-color: button-border;
+    accessible-role: button;
+    accessible-label: tooltip-text;
+
+    callback clicked();
+
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        source: root.icon;
+        width: icon-size;
+        height: icon-size;
+        colorize: icon-color;
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

@@ -1,0 +1,343 @@
+import { Theme } from "../theme.slint";
+import { CheatEntry } from "../types.slint";
+import { ModalBackdrop } from "../components/modal-backdrop.slint";
+import { IconButton } from "../components/icon-button.slint";
+import { TextField } from "../components/text-field.slint";
+import { ScrollView } from "std-widgets.slint";
+
+component FieldLabel inherits Text {
+    color: Theme.text-dim;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+component RecordButton inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+
+    background: Theme.panel2;
+    border-width: 1px;
+    border-color: Theme.border;
+    border-radius: 7px;
+    height: lay.min-height;
+
+    lay := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("../../assets/images/icons/record.svg");
+                width: 14px;
+                height: 14px;
+                colorize: Theme.accent;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.label;
+            color: Theme.text;
+            font-size: 14px;
+            overflow: elide;
+        }
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component AddEditTrainerModal inherits ModalBackdrop {
+    in property <string> title-text: "Add trainer";
+    in property <string> save-label: "Add trainer";
+    in property <color> form-color: Theme.accent;
+    in property <string> form-letter: "?";
+    in-out property <string> form-name;
+    in property <string> form-exe-display: "No executable selected";
+    in property <string> form-shortcut-display: "Click to record shortcut";
+    in property <[CheatEntry]> cheats;
+
+    callback name-changed(string);
+    callback browse-exe();
+    callback record-shortcut();
+    callback add-cheat();
+    callback remove-cheat(int);
+    callback cheat-label-changed(int, string);
+    callback record-cheat(int);
+    callback cancel();
+    callback save();
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 680px;
+        height: 620px;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.border;
+        border-radius: 14px;
+        clip: true;
+
+        VerticalLayout {
+            Rectangle {
+                height: 76px;
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    spacing: 14px;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 9px;
+                        background: root.form-color;
+
+                        Text {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            text: root.form-letter;
+                            color: Theme.on-accent;
+                            font-size: 17px;
+                            font-weight: 700;
+                        }
+                    }
+
+                    Text {
+                        text: root.title-text;
+                        color: Theme.text;
+                        font-size: 20px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    IconButton {
+                        icon: @image-url("../../assets/images/icons/close.svg");
+                        icon-size: 16px;
+                        button-size: 34px;
+                        bordered: false;
+                        icon-color: Theme.text-dim;
+                        tooltip-text: "Close";
+                        clicked => { root.cancel(); }
+                    }
+                }
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 22px;
+                    padding-bottom: 22px;
+                    spacing: 20px;
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Name"; }
+                        TextField {
+                            placeholder: "Trainer name";
+                            text <=> root.form-name;
+                            edited => { root.name-changed(self.text); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Game executable"; }
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            cross-axis-alignment: center;
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 44px;
+                                background: Theme.panel2;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                border-radius: 8px;
+
+                                Text {
+                                    x: 14px;
+                                    width: parent.width - 28px;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                    text: root.form-exe-display;
+                                    color: Theme.text-dim;
+                                    font-size: 15px;
+                                    overflow: elide;
+                                }
+                            }
+
+                            Rectangle {
+                                background: Theme.panel2;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                border-radius: 8px;
+                                height: 44px;
+                                width: browse-lay.min-width;
+
+                                browse-lay := HorizontalLayout {
+                                    padding-left: 18px;
+                                    padding-right: 18px;
+                                    alignment: center;
+                                    Text { text: "Browse…"; color: Theme.text; font-size: 14px; font-weight: 600; }
+                                }
+
+                                TouchArea { clicked => { root.browse-exe(); } }
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Shortcut to launch trainer"; }
+                        RecordButton {
+                            label: root.form-shortcut-display;
+                            clicked => { root.record-shortcut(); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+
+                            FieldLabel { horizontal-stretch: 1; text: "Cheats to enable"; }
+
+                            Rectangle {
+                                width: add-cheat-lay.min-width;
+                                height: add-cheat-lay.min-height;
+
+                                add-cheat-lay := HorizontalLayout {
+                                    spacing: 5px;
+                                    cross-axis-alignment: center;
+
+                                    Image {
+                                        source: @image-url("../../assets/images/icons/add.svg");
+                                        width: 14px;
+                                        height: 14px;
+                                        colorize: Theme.accent;
+                                    }
+                                    Text { text: "Add cheat"; color: Theme.accent; font-size: 13px; font-weight: 600; }
+                                }
+
+                                TouchArea { clicked => { root.add-cheat(); } }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            for c in root.cheats: HorizontalLayout {
+                                spacing: 8px;
+                                cross-axis-alignment: center;
+
+                                TextField {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    field-font-size: 14px;
+                                    placeholder: "Cheat name (e.g. Infinite Health)";
+                                    text: c.label;
+                                    edited => { root.cheat-label-changed(c.id, self.text); }
+                                }
+
+                                RecordButton {
+                                    width: 170px;
+                                    label: c.key;
+                                    clicked => { root.record-cheat(c.id); }
+                                }
+
+                                IconButton {
+                                    icon: @image-url("../../assets/images/icons/close.svg");
+                                    icon-size: 14px;
+                                    button-size: 36px;
+                                    icon-color: Theme.danger;
+                                    tooltip-text: "Remove cheat";
+                                    clicked => { root.remove-cheat(c.id); }
+                                }
+                            }
+
+                            if root.cheats.length == 0: Text {
+                                text: "No cheats added yet — click \"Add cheat\" above.";
+                                color: Theme.text-dim;
+                                font-size: 13px;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 70px;
+
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border;
+                }
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    spacing: 10px;
+                    alignment: center;
+                    cross-axis-alignment: center;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: Theme.panel2;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        border-radius: 8px;
+                        height: cancel-lay.min-height;
+
+                        cancel-lay := HorizontalLayout {
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+                            alignment: center;
+                            Text { text: "Cancel"; color: Theme.text; font-size: 15px; font-weight: 600; }
+                        }
+
+                        TouchArea { clicked => { root.cancel(); } }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: Theme.accent;
+                        border-radius: 8px;
+                        height: save-lay.min-height;
+
+                        save-lay := HorizontalLayout {
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+                            alignment: center;
+                            Text { text: root.save-label; color: Theme.on-accent; font-size: 15px; font-weight: 700; }
+                        }
+
+                        TouchArea { clicked => { root.save(); } }
+                    }
+                }
+            }
+        }
+    }
+}

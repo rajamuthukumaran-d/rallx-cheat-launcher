@@ -1,74 +1,176 @@
-import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { TrainerItem, CheatEntry } from "types.slint";
+import { HomeScreen } from "screens/home-screen.slint";
+import { SettingsScreen } from "screens/settings-screen.slint";
+import { DeleteConfirmModal } from "modals/delete-confirm-modal.slint";
+import { AddEditTrainerModal } from "modals/add-edit-trainer-modal.slint";
+import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
+import { Toast } from "components/toast.slint";
+
+export { TrainerItem, CheatEntry }
+
+export enum AppView { home, settings }
 
 export component AppWindow inherits Window {
     title: "Rallx Cheat Launcher";
-    width: 800px;
-    height: 600px;
-    background: #121214;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 860px;
+    min-height: 560px;
+    default-font-family: "Segoe UI";
+    background: Theme.bg;
 
-    in-out property <string> status-text: "No trainer folder configured";
-    in-out property <bool> is-settings-open: false;
+    in-out property <AppView> view: AppView.home;
+    in-out property <bool> edit-mode: false;
+    in-out property <bool> show-search: false;
+    in-out property <string> search-query: "";
+    in-out property <bool> close-after-launch: true;
 
-    callback close-clicked();
-    callback launch-trainer(string);
+    in-out property <[TrainerItem]> visible-trainers: [];
+    in-out property <int> trainer-count: 0;
+    in-out property <string> total-size-label: "0.0 MB";
 
-    VerticalBox {
-        padding: 24px;
-        spacing: 16px;
+    in-out property <string> folder-path: "No folder selected";
+    in-out property <string> default-shortcut-label: "Not set";
 
-        HorizontalBox {
-            alignment: space-between;
-            Text {
-                text: "Rallx Cheat Launcher";
-                font-size: 24px;
-                color: #ffffff;
-                font-weight: 700;
-            }
-            Button {
-                text: root.is-settings-open ? "Back to Home" : "Settings";
-                clicked => {
-                    root.is-settings-open = !root.is-settings-open;
-                }
-            }
+    in-out property <int> delete-confirm-id: -1;
+    in-out property <string> delete-confirm-name: "";
+
+    in-out property <bool> show-add-edit: false;
+    in-out property <int> editing-id: -1;
+    in-out property <string> form-title: "Add trainer";
+    in-out property <string> form-save-label: "Add trainer";
+    in-out property <color> form-color: Theme.accent;
+    in-out property <string> form-letter: "?";
+    in-out property <string> form-name: "";
+    in-out property <string> form-exe-display: "No executable selected";
+    in-out property <string> form-shortcut: "";
+    in-out property <string> form-shortcut-display: "Click to record shortcut";
+    in-out property <[CheatEntry]> form-cheats: [];
+
+    in-out property <bool> recording: false;
+    in-out property <string> recording-target: "";
+    in-out property <int> recording-cheat-id: -1;
+    in-out property <string> recorded-combo: "";
+
+    in-out property <bool> show-toast: false;
+    in-out property <string> toast-message: "";
+
+    callback launch-trainer(int);
+    callback copy-script(int);
+    callback request-delete(int);
+    callback confirm-delete(int);
+    callback open-add();
+    callback open-edit(int);
+    callback save-form();
+    callback search-changed(string);
+    callback browse-folder();
+    callback browse-exe();
+    callback add-cheat-row();
+    callback remove-cheat-row(int);
+    callback set-cheat-label(int, string);
+    callback set-cheat-key(int, string);
+
+    Timer {
+        interval: 1800ms;
+        running: root.show-toast;
+        triggered => { root.show-toast = false; }
+    }
+
+    if root.view == AppView.home: HomeScreen {
+        width: 100%;
+        height: 100%;
+        edit-mode <=> root.edit-mode;
+        show-search <=> root.show-search;
+        search-query <=> root.search-query;
+        close-after-launch <=> root.close-after-launch;
+        visible-trainers: root.visible-trainers;
+        trainer-count: root.trainer-count;
+        total-size-label: root.total-size-label;
+
+        open-add => { root.open-add(); }
+        open-settings => { root.view = AppView.settings; }
+        launch-trainer(id) => { root.launch-trainer(id); }
+        edit-trainer(id) => { root.open-edit(id); }
+        delete-trainer(id) => { root.request-delete(id); }
+        copy-trainer(id) => { root.copy-script(id); }
+        search-changed(q) => { root.search-changed(q); }
+    }
+
+    if root.view == AppView.settings: SettingsScreen {
+        width: 100%;
+        height: 100%;
+        folder-path: root.folder-path;
+        default-shortcut-label: root.default-shortcut-label;
+        close-after-launch <=> root.close-after-launch;
+
+        back => { root.view = AppView.home; }
+        browse-folder => { root.browse-folder(); }
+        record-default-shortcut => {
+            root.recording-target = "default";
+            root.recorded-combo = "";
+            root.recording = true;
         }
+    }
 
-        Text {
-            text: root.status-text;
-            color: #8a8a93;
-            font-size: 14px;
-        }
+    if root.delete-confirm-id >= 0: DeleteConfirmModal {
+        trainer-name: root.delete-confirm-name;
+        cancel => { root.delete-confirm-id = -1; }
+        confirm => { root.confirm-delete(root.delete-confirm-id); }
+    }
 
-        if !root.is-settings-open : VerticalBox {
-            spacing: 12px;
-            Text {
-                text: "Available Trainers";
-                color: #ffffff;
-                font-size: 18px;
-                font-weight: 600;
-            }
-            ScrollView {
-                Text {
-                    text: "No trainers found. Go to Settings to configure a trainer folder.";
-                    color: #52525b;
-                    horizontal-alignment: center;
-                }
-            }
-        }
+    if root.show-add-edit: AddEditTrainerModal {
+        title-text: root.form-title;
+        save-label: root.form-save-label;
+        form-color: root.form-color;
+        form-letter: root.form-letter;
+        form-name <=> root.form-name;
+        form-exe-display: root.form-exe-display;
+        form-shortcut-display: root.form-shortcut-display;
+        cheats: root.form-cheats;
 
-        if root.is-settings-open : VerticalBox {
-            spacing: 12px;
-            Text {
-                text: "Settings";
-                color: #ffffff;
-                font-size: 18px;
-                font-weight: 600;
-            }
-            Text {
-                text: "Trainer Folder Selection (Configuration will be loaded/saved here)";
-                color: #8a8a93;
-                font-size: 14px;
-            }
-            // Future configuration settings inputs can go here
+        name-changed(v) => { root.form-name = v; }
+        browse-exe => { root.browse-exe(); }
+        record-shortcut => {
+            root.recording-target = "shortcut";
+            root.recorded-combo = "";
+            root.recording = true;
         }
+        add-cheat => { root.add-cheat-row(); }
+        remove-cheat(id) => { root.remove-cheat-row(id); }
+        cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
+        record-cheat(id) => {
+            root.recording-target = "cheat";
+            root.recording-cheat-id = id;
+            root.recorded-combo = "";
+            root.recording = true;
+        }
+        cancel => { root.show-add-edit = false; }
+        save => { root.save-form(); }
+    }
+
+    if root.recording: KeyRecorderModal {
+        recorded-combo <=> root.recorded-combo;
+        cancel => {
+            root.recording = false;
+            root.recorded-combo = "";
+        }
+        confirm => {
+            if root.recording-target == "cheat" {
+                root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
+            } else if root.recording-target == "shortcut" {
+                root.form-shortcut = root.recorded-combo;
+                root.form-shortcut-display = root.recorded-combo;
+            } else {
+                root.default-shortcut-label = root.recorded-combo;
+            }
+            root.recording = false;
+            root.recorded-combo = "";
+        }
+    }
+
+    Toast {
+        message: root.toast-message;
+        show: root.show-toast;
     }
 }

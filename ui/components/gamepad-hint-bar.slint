@@ -1,0 +1,113 @@
+import { Theme } from "../theme.slint";
+
+component Hint inherits HorizontalLayout {
+    in property <image> icon;
+    in property <string> label;
+    in property <brush> badge-bg;
+    in property <brush> icon-color;
+    in property <bool> circle: true;
+    in property <bool> bordered: false;
+
+    spacing: 8px;
+    alignment: center;
+    cross-axis-alignment: center;
+
+    Rectangle {
+        height: 22px;
+        width: circle ? 22px : 28px;
+        border-radius: circle ? 11px : 6px;
+        background: badge-bg;
+        border-width: bordered ? 1px : 0px;
+        border-color: Theme.border;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            source: root.icon;
+            width: 12px;
+            height: 12px;
+            colorize: root.icon-color;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Theme.text-dim;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+export component GamepadHintBar inherits Rectangle {
+    in property <int> trainer-count;
+    in property <string> total-size-label;
+
+    height: 46px;
+    background: Theme.panel;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 28px;
+        spacing: 26px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/A.svg");
+            label: "Launch";
+            badge-bg: #4caf50;
+            icon-color: Theme.on-accent;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/X.svg");
+            label: "Edit";
+            badge-bg: #4a90e2;
+            icon-color: Theme.on-accent;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Y.svg");
+            label: "Search";
+            badge-bg: #e2c94a;
+            icon-color: Theme.on-accent;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/View.svg");
+            label: "Delete";
+            circle: false;
+            bordered: true;
+            badge-bg: Theme.panel2;
+            icon-color: Theme.text-dim;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Right Bumper.svg");
+            label: "Copy script";
+            circle: false;
+            bordered: true;
+            badge-bg: Theme.panel2;
+            icon-color: Theme.text-dim;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Menu.svg");
+            label: "Settings";
+            circle: false;
+            bordered: true;
+            badge-bg: Theme.panel2;
+            icon-color: Theme.text-dim;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        Text {
+            text: trainer-count + " trainers · " + total-size-label + " total";
+            color: Theme.text-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+}

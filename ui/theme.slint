@@ -1,0 +1,29 @@
+// Central design tokens, translated from mockups/mockup.html's `theme` object.
+// `dark`, `accent` and `compact` are the only properties ever assigned to directly;
+// everything else stays a reactive expression so the whole UI re-themes instantly.
+export global Theme {
+    in-out property <bool> dark: true;
+    in-out property <color> accent: #5b8cff;
+    in-out property <bool> compact: false;
+
+    out property <color> bg: dark ? #0b0d12 : #eef0f4;
+    out property <color> panel: dark ? #12151b : #ffffff;
+    out property <color> panel2: dark ? #191d25 : #f4f5f8;
+    out property <color> border: dark ? #262b34 : #dadde3;
+    out property <color> text: dark ? #e9ebf0 : #161a20;
+    out property <color> text-dim: dark ? #8b93a1 : #6b7280;
+    out property <color> danger: dark ? #ff5c5c : #d13a3a;
+    // Text/icons drawn on top of the accent color itself (buttons, badges).
+    out property <color> on-accent: #05060a;
+
+    out property <length> row-padding-v: compact ? 8px : 12px;
+    out property <length> row-padding-h: compact ? 12px : 16px;
+    out property <length> row-gap: compact ? 5px : 8px;
+    out property <length> row-inner-gap: compact ? 12px : 16px;
+    out property <length> row-icon-size: compact ? 36px : 44px;
+}
+
+export global Palette {
+    out property <[color]> accents: [#5b8cff, #39ff9d, #ff9f5b, #c86bff, #ffcf3d];
+    out property <[color]> row-colors: [#5b8cff, #ff9f5b, #5bffb0, #ff5b8c, #c8905b, #8c5bff];
+}

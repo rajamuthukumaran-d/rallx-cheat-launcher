@@ -1,0 +1,11 @@
+// Dim full-window overlay. The single child is expected to center itself via
+// `x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;`
+// (see delete-confirm-modal.slint etc.) rather than relying on layout stretch,
+// which would otherwise force the modal box to the backdrop's full height.
+export component ModalBackdrop inherits Rectangle {
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+
+    @children
+}

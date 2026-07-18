@@ -1,0 +1,33 @@
+import { Theme } from "../theme.slint";
+
+export component ToggleSwitch inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <length> track-width: 42px;
+    in property <length> track-height: 24px;
+    callback toggled();
+
+    width: track-width;
+    height: track-height;
+    border-radius: track-height / 2;
+    background: checked ? Theme.accent : Theme.border;
+
+    animate background { duration: 120ms; }
+
+    Rectangle {
+        x: checked ? (parent.width - self.width - 3px) : 3px;
+        y: (parent.height - self.height) / 2;
+        width: track-height - 6px;
+        height: track-height - 6px;
+        border-radius: self.width / 2;
+        background: #ffffff;
+
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}

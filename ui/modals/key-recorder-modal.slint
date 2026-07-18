@@ -1,0 +1,197 @@
+import { Theme } from "../theme.slint";
+import { ModalBackdrop } from "../components/modal-backdrop.slint";
+
+// Note: Slint's FocusScope reports *logical* keys (the character produced), the
+// same model browsers use for KeyboardEvent.key. There is no physical-scancode
+// equivalent exposed here, so a numpad digit and its top-row twin are
+// indistinguishable at this layer (both simply produce text "1"). That's a
+// known boundary of this UI-only pass — real OS-level scancode capture belongs
+// to the future hotkey.rs/global-hotkey integration, not this prototype.
+export component KeyRecorderModal inherits ModalBackdrop {
+    in-out property <string> recorded-combo: "";
+    callback cancel();
+    callback confirm();
+
+    function is-bare-modifier(text: string) -> bool {
+        return text == Key.Control || text == Key.ControlR
+            || text == Key.Shift || text == Key.ShiftR
+            || text == Key.Alt || text == Key.AltGr
+            || text == Key.Meta || text == Key.MetaR;
+    }
+
+    function key-label(text: string) -> string {
+        if (text == Key.Escape) { return "Esc"; }
+        if (text == Key.Return) { return "Enter"; }
+        if (text == Key.Tab) { return "Tab"; }
+        if (text == Key.Backspace) { return "Backspace"; }
+        if (text == Key.Delete) { return "Delete"; }
+        if (text == Key.UpArrow) { return "Up"; }
+        if (text == Key.DownArrow) { return "Down"; }
+        if (text == Key.LeftArrow) { return "Left"; }
+        if (text == Key.RightArrow) { return "Right"; }
+        if (text == Key.F1) { return "F1"; }
+        if (text == Key.F2) { return "F2"; }
+        if (text == Key.F3) { return "F3"; }
+        if (text == Key.F4) { return "F4"; }
+        if (text == Key.F5) { return "F5"; }
+        if (text == Key.F6) { return "F6"; }
+        if (text == Key.F7) { return "F7"; }
+        if (text == Key.F8) { return "F8"; }
+        if (text == Key.F9) { return "F9"; }
+        if (text == Key.F10) { return "F10"; }
+        if (text == Key.F11) { return "F11"; }
+        if (text == Key.F12) { return "F12"; }
+        if (text == " ") { return "Space"; }
+        return text.to-uppercase();
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 440px;
+        height: box-content.min-height;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.accent;
+        border-radius: 14px;
+
+        box-content := VerticalLayout {
+            padding-left: 44px;
+            padding-right: 44px;
+            padding-top: 36px;
+            padding-bottom: 36px;
+            cross-axis-alignment: center;
+
+            Rectangle {
+                width: 56px;
+                height: 56px;
+                border-radius: 28px;
+                background: Theme.danger.transparentize(0.8);
+
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.danger;
+                }
+            }
+
+            Rectangle { height: 18px; }
+
+            Text {
+                text: "Press a key or combination";
+                color: Theme.text;
+                font-size: 19px;
+                font-weight: 700;
+                horizontal-alignment: center;
+            }
+
+            Rectangle { height: 8px; }
+
+            Text {
+                text: "e.g. Numpad 1, or Ctrl + Numpad 3";
+                color: Theme.text-dim;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+
+            Rectangle { height: 22px; }
+
+            Rectangle {
+                min-height: 56px;
+
+                if root.recorded-combo.is-empty: Text {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    text: "Waiting for input…";
+                    color: Theme.text-dim;
+                    font-size: 14px;
+                }
+
+                if !root.recorded-combo.is-empty: Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: Theme.accent;
+                    border-radius: 6px;
+                    height: combo-lay.min-height;
+
+                    combo-lay := HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+
+                        Text {
+                            text: root.recorded-combo;
+                            color: Theme.on-accent;
+                            font-size: 15px;
+                            font-weight: 700;
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 26px; }
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: Theme.panel2;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    border-radius: 8px;
+                    height: cancel-lay.min-height;
+
+                    cancel-lay := HorizontalLayout {
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        alignment: center;
+
+                        Text { text: "Cancel"; color: Theme.text; font-size: 15px; font-weight: 600; }
+                    }
+
+                    TouchArea { clicked => { root.cancel(); } }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: Theme.accent;
+                    border-radius: 8px;
+                    height: use-lay.min-height;
+
+                    use-lay := HorizontalLayout {
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        alignment: center;
+
+                        Text { text: "Use combo"; color: Theme.on-accent; font-size: 15px; font-weight: 700; }
+                    }
+
+                    TouchArea { clicked => { root.confirm(); } }
+                }
+            }
+        }
+
+        key-input := FocusScope {
+            width: 0px;
+
+            key-pressed(event) => {
+                if (!root.is-bare-modifier(event.text)) {
+                    root.recorded-combo =
+                        (event.modifiers.control ? "Ctrl + " : "")
+                        + (event.modifiers.alt ? "Alt + " : "")
+                        + (event.modifiers.shift ? "Shift + " : "")
+                        + (event.modifiers.meta ? "Meta + " : "")
+                        + root.key-label(event.text);
+                }
+                return accept;
+            }
+
+            init => { self.focus(); }
+        }
+    }
+}

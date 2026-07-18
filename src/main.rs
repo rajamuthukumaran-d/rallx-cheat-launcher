@@ -1,5 +1,6 @@
 slint::include_modules!();
 
+mod app_state;
 mod config;
 mod gamepad;
 mod hotkey;
@@ -44,11 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (_config, folder_path) = config::load_config();
-    if let Some(folder) = folder_path {
-        app.set_status_text(format!("Trainer folder: {}", folder.display()).into());
-    } else {
-        app.set_status_text("Please configure a trainer folder in Settings.".into());
-    }
+    app_state::wire(&app, folder_path);
 
     app.run()?;
     Ok(())
