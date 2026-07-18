@@ -3,7 +3,6 @@ import { TrainerItem } from "../types.slint";
 import { IconButton } from "../components/icon-button.slint";
 import { TrainerRow } from "../components/trainer-row.slint";
 import { GamepadHintBar } from "../components/gamepad-hint-bar.slint";
-import { ToggleSwitch } from "../components/toggle-switch.slint";
 import { ListView } from "std-widgets.slint";
 
 export component HomeScreen inherits Rectangle {
@@ -129,31 +128,15 @@ export component HomeScreen inherits Rectangle {
                     clicked => { root.show-search = true; }
                 }
 
-                Rectangle {
-                    background: Theme.panel2;
-                    border-radius: 8px;
-                    width: edit-mode-chip.min-width;
-                    height: edit-mode-chip.min-height;
-
-                    edit-mode-chip := HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        padding-top: 8px;
-                        padding-bottom: 8px;
-                        spacing: 8px;
-                        cross-axis-alignment: center;
-
-                        Text {
-                            text: "Edit mode";
-                            color: Theme.text-dim;
-                            font-size: 14px;
-                            font-weight: 500;
-                            vertical-alignment: center;
-                        }
-                        ToggleSwitch {
-                            checked <=> root.edit-mode;
-                        }
-                    }
+                IconButton {
+                    icon: @image-url("../../assets/images/icons/edit.svg");
+                    icon-size: 17px;
+                    button-size: 40px;
+                    bordered: !root.edit-mode;
+                    button-bg: root.edit-mode ? Theme.accent : Theme.panel2;
+                    icon-color: root.edit-mode ? Theme.on-accent : Theme.text-dim;
+                    tooltip-text: root.edit-mode ? "Done editing" : "Edit trainers";
+                    clicked => { root.edit-mode = !root.edit-mode; }
                 }
 
                 IconButton {
@@ -246,6 +229,7 @@ export component HomeScreen inherits Rectangle {
                             height: 18px;
                             colorize: Theme.on-accent;
                         }
+
                         Text {
                             text: "Add trainer";
                             color: Theme.on-accent;
