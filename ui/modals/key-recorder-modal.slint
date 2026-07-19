@@ -101,33 +101,39 @@ export component KeyRecorderModal inherits ModalBackdrop {
 
             Rectangle {
                 min-height: 56px;
+                width: 100%;
 
-                if root.recorded-combo.is-empty: Text {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    text: "Waiting for input…";
-                    color: Theme.text-dim;
-                    font-size: 14px;
+                if root.recorded-combo.is-empty: HorizontalLayout {
+                    alignment: center;
+
+                    Text {
+                        text: "Waiting for input…";
+                        color: Theme.text-dim;
+                        font-size: 14px;
+                    }
                 }
 
-                if !root.recorded-combo.is-empty: Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    background: Theme.accent;
-                    border-radius: 6px;
-                    height: combo-lay.min-height;
+                if !root.recorded-combo.is-empty: HorizontalLayout {
+                    alignment: center;
 
-                    combo-lay := HorizontalLayout {
-                        padding-left: 14px;
-                        padding-right: 14px;
-                        padding-top: 8px;
-                        padding-bottom: 8px;
+                    Rectangle {
+                        background: Theme.accent;
+                        border-radius: 6px;
+                        width: combo-lay.min-width;
+                        height: combo-lay.min-height;
 
-                        Text {
-                            text: root.recorded-combo;
-                            color: Theme.on-accent;
-                            font-size: 15px;
-                            font-weight: 700;
+                        combo-lay := HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+
+                            Text {
+                                text: root.recorded-combo;
+                                color: Theme.on-accent;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
                         }
                     }
                 }
@@ -136,6 +142,7 @@ export component KeyRecorderModal inherits ModalBackdrop {
             Rectangle { height: 26px; }
 
             HorizontalLayout {
+                width: 100%;
                 spacing: 10px;
 
                 Rectangle {

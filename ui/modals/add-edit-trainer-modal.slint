@@ -143,6 +143,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                 vertical-stretch: 1;
 
                 VerticalLayout {
+                    alignment: start;
                     padding-left: 24px;
                     padding-right: 24px;
                     padding-top: 22px;
@@ -150,6 +151,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     spacing: 20px;
 
                     VerticalLayout {
+                        vertical-stretch: 0;
                         spacing: 6px;
                         FieldLabel { text: "Name"; }
                         TextField {
@@ -160,6 +162,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     }
 
                     VerticalLayout {
+                        vertical-stretch: 0;
                         spacing: 6px;
                         FieldLabel { text: "Game executable"; }
 
@@ -199,6 +202,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                     padding-left: 18px;
                                     padding-right: 18px;
                                     alignment: center;
+                                    cross-axis-alignment: center;
                                     Text { text: "Browse…"; color: Theme.text; font-size: 14px; font-weight: 600; }
                                 }
 
@@ -208,6 +212,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     }
 
                     VerticalLayout {
+                        vertical-stretch: 0;
                         spacing: 6px;
                         FieldLabel { text: "Shortcut to launch trainer"; }
                         RecordButton {
@@ -217,6 +222,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     }
 
                     VerticalLayout {
+                        vertical-stretch: 0;
                         spacing: 8px;
 
                         HorizontalLayout {
@@ -300,7 +306,6 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     padding-left: 24px;
                     padding-right: 24px;
                     spacing: 10px;
-                    alignment: center;
                     cross-axis-alignment: center;
 
                     Rectangle {
