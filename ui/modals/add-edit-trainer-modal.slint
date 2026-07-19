@@ -101,22 +101,6 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     spacing: 14px;
                     cross-axis-alignment: center;
 
-                    Rectangle {
-                        width: 40px;
-                        height: 40px;
-                        border-radius: 9px;
-                        background: root.form-color;
-
-                        Text {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            text: root.form-letter;
-                            color: Theme.on-accent;
-                            font-size: 17px;
-                            font-weight: 700;
-                        }
-                    }
-
                     Text {
                         text: root.title-text;
                         color: Theme.text;
