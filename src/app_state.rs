@@ -45,20 +45,22 @@ fn make_cheat(state: &AppState, label: &str, key: &str) -> CheatEntry {
     }
 }
 
-fn make_trainer(
-    state: &AppState,
-    name: &str,
-    version: &str,
-    size: &str,
-    exe: &str,
-    shortcut: &str,
+struct NewTrainer<'a> {
+    name: &'a str,
+    version: &'a str,
+    size: &'a str,
+    exe: &'a str,
+    shortcut: &'a str,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
-) -> TrainerItem {
+}
+
+fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
     let id = state.next_trainer_id.get();
     state.next_trainer_id.set(id + 1);
     let color = row_color(id as usize);
-    let letter = name
+    let letter = fields
+        .name
         .chars()
         .next()
         .unwrap_or('?')
@@ -66,16 +68,16 @@ fn make_trainer(
         .to_string();
     TrainerItem {
         id,
-        name: name.into(),
-        version: version.into(),
-        size: size.into(),
-        exe: exe.into(),
-        shortcut: shortcut.into(),
+        name: fields.name.into(),
+        version: fields.version.into(),
+        size: fields.size.into(),
+        exe: fields.exe.into(),
+        shortcut: fields.shortcut.into(),
         color,
         letter: letter.into(),
-        has_icon: icon.is_some(),
-        icon: icon.unwrap_or_default(),
-        cheats: ModelRc::new(VecModel::from(cheats)),
+        has_icon: fields.icon.is_some(),
+        icon: fields.icon.unwrap_or_default(),
+        cheats: ModelRc::new(VecModel::from(fields.cheats)),
     }
 }
 
@@ -94,15 +96,18 @@ fn config_to_trainer_item(
         .map(|key| make_cheat(state, "", key))
         .collect();
     let icon = exe_path.and_then(exe_icon::extract_icon);
+    let size = format_size(cfg.size_bytes);
     make_trainer(
         state,
-        &cfg.name,
-        &cfg.version,
-        &format_size(cfg.size_bytes),
-        &cfg.filename,
-        cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
-        cheats,
-        icon,
+        NewTrainer {
+            name: &cfg.name,
+            version: &cfg.version,
+            size: &size,
+            exe: &cfg.filename,
+            shortcut: cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
+            cheats,
+            icon,
+        },
     )
 }
 
@@ -111,7 +116,10 @@ fn trainer_items_from_config(state: &AppState, config: &AppConfig) -> Vec<Traine
         .trainers
         .iter()
         .map(|cfg| {
-            let exe_path = config.trainer_folder.as_ref().map(|f| f.join(&cfg.filename));
+            let exe_path = config
+                .trainer_folder
+                .as_ref()
+                .map(|f| f.join(&cfg.filename));
             config_to_trainer_item(state, cfg, exe_path.as_deref())
         })
         .collect()
@@ -349,8 +357,18 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             let editing_id = app.get_editing_id();
 
             if editing_id < 0 {
-                let trainer =
-                    make_trainer(&state, &name, "1.0.0", "— MB", &exe, &shortcut, cheats, None);
+                let trainer = make_trainer(
+                    &state,
+                    NewTrainer {
+                        name: &name,
+                        version: "1.0.0",
+                        size: "— MB",
+                        exe: &exe,
+                        shortcut: &shortcut,
+                        cheats,
+                        icon: None,
+                    },
+                );
                 state.trainers.borrow_mut().push(trainer);
                 show_toast(&app, "Trainer added");
             } else {
