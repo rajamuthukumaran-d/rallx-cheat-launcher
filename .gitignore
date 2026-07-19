@@ -2,3 +2,4 @@
 /mockups/temp
 *.rs.bk
 *.json.bk
+.claude
