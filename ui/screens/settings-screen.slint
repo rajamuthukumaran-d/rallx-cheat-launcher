@@ -101,12 +101,15 @@ export component SettingsScreen inherits Rectangle {
             vertical-stretch: 1;
 
             VerticalLayout {
+                alignment: start;
                 max-width: 820px;
                 padding: 28px;
 
                 SectionLabel {
                     text: "General";
                 }
+
+                Rectangle { height: 6px; }
 
                 Rectangle {
                     background: Theme.panel;
@@ -203,6 +206,8 @@ export component SettingsScreen inherits Rectangle {
                 SectionLabel {
                     text: "Theme";
                 }
+
+                Rectangle { height: 6px; }
 
                 Rectangle {
                     background: Theme.panel;
