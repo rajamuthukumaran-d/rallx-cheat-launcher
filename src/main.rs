@@ -3,6 +3,7 @@ slint::include_modules!();
 mod app_state;
 mod config;
 mod exe_icon;
+mod exe_version;
 mod gamepad;
 mod hotkey;
 mod trainer;

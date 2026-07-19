@@ -78,11 +78,9 @@ export component TrainerRow inherits Rectangle {
                     spacing: 10px;
                     alignment: start;
 
-                    Text { text: "v" + trainer.version; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
                     Text { text: trainer.size; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: trainer.exe; color: Theme.text-dim; font-size: 13px; }
+                    if trainer.version != "": Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
+                    if trainer.version != "": Text { text: "v" + trainer.version; color: Theme.text-dim; font-size: 13px; }
                 }
             }
 
