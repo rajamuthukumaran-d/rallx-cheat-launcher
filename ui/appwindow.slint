@@ -1,0 +1,171 @@
+import { Theme } from "theme.slint";
+import { TrainerItem, CheatEntry } from "types.slint";
+import { HomeScreen } from "screens/home-screen.slint";
+import { SettingsScreen } from "screens/settings-screen.slint";
+import { DeleteConfirmModal } from "modals/delete-confirm-modal.slint";
+import { AddEditTrainerModal } from "modals/add-edit-trainer-modal.slint";
+import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
+import { Toast } from "components/toast.slint";
+
+export { TrainerItem, CheatEntry }
+
+export enum AppView { home, settings }
+
+export component AppWindow inherits Window {
+    title: "Rallx Cheat Launcher";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 860px;
+    min-height: 560px;
+    default-font-family: "Segoe UI";
+    background: Theme.bg;
+
+    in-out property <AppView> view: AppView.home;
+    in-out property <bool> edit-mode: false;
+    in-out property <bool> show-search: false;
+    in-out property <string> search-query: "";
+    in-out property <bool> close-after-launch: true;
+
+    in-out property <[TrainerItem]> visible-trainers: [];
+    in-out property <int> trainer-count: 0;
+    in-out property <string> total-size-label: "0.0 MB";
+
+    in-out property <string> folder-path: "No folder selected";
+    in-out property <string> default-shortcut-label: "Not set";
+
+    in-out property <int> delete-confirm-id: -1;
+    in-out property <string> delete-confirm-name: "";
+
+    in-out property <bool> show-add-edit: false;
+    in-out property <int> editing-id: -1;
+    in-out property <string> form-title: "Add trainer";
+    in-out property <string> form-save-label: "Add trainer";
+    in-out property <string> form-name: "";
+    in-out property <string> form-exe-display: "No executable selected";
+    in-out property <string> form-shortcut: "";
+    in-out property <string> form-shortcut-display: "Click to record shortcut";
+    in-out property <[CheatEntry]> form-cheats: [];
+
+    in-out property <bool> recording: false;
+    in-out property <string> recording-target: "";
+    in-out property <int> recording-cheat-id: -1;
+    in-out property <string> recorded-combo: "";
+
+    in-out property <bool> show-toast: false;
+    in-out property <string> toast-message: "";
+
+    callback launch-trainer(int);
+    callback copy-script(int);
+    callback request-delete(int);
+    callback confirm-delete(int);
+    callback open-add();
+    callback open-edit(int);
+    callback save-form();
+    callback search-changed(string);
+    callback browse-folder();
+    callback browse-exe();
+    callback add-cheat-row();
+    callback remove-cheat-row(int);
+    callback set-cheat-label(int, string);
+    callback set-cheat-key(int, string);
+
+    Timer {
+        interval: 1800ms;
+        running: root.show-toast;
+        triggered => { root.show-toast = false; }
+    }
+
+    if root.view == AppView.home: HomeScreen {
+        width: 100%;
+        height: 100%;
+        edit-mode <=> root.edit-mode;
+        show-search <=> root.show-search;
+        search-query <=> root.search-query;
+        visible-trainers: root.visible-trainers;
+        trainer-count: root.trainer-count;
+        total-size-label: root.total-size-label;
+
+        open-add => { root.open-add(); }
+        open-settings => { root.view = AppView.settings; }
+        launch-trainer(id) => { root.launch-trainer(id); }
+        edit-trainer(id) => { root.open-edit(id); }
+        delete-trainer(id) => { root.request-delete(id); }
+        copy-trainer(id) => { root.copy-script(id); }
+        search-changed(q) => { root.search-changed(q); }
+    }
+
+    if root.view == AppView.settings: SettingsScreen {
+        width: 100%;
+        height: 100%;
+        folder-path: root.folder-path;
+        default-shortcut-label: root.default-shortcut-label;
+        close-after-launch <=> root.close-after-launch;
+
+        back => { root.view = AppView.home; }
+        browse-folder => { root.browse-folder(); }
+        record-default-shortcut => {
+            root.recording-target = "default";
+            root.recorded-combo = "";
+            root.recording = true;
+        }
+    }
+
+    if root.delete-confirm-id >= 0: DeleteConfirmModal {
+        trainer-name: root.delete-confirm-name;
+        cancel => { root.delete-confirm-id = -1; }
+        confirm => { root.confirm-delete(root.delete-confirm-id); }
+    }
+
+    if root.show-add-edit: AddEditTrainerModal {
+        title-text: root.form-title;
+        save-label: root.form-save-label;
+        form-name <=> root.form-name;
+        form-exe-display: root.form-exe-display;
+        form-shortcut-display: root.form-shortcut-display;
+        cheats: root.form-cheats;
+
+        name-changed(v) => { root.form-name = v; }
+        browse-exe => { root.browse-exe(); }
+        record-shortcut => {
+            root.recording-target = "shortcut";
+            root.recorded-combo = "";
+            root.recording = true;
+        }
+        add-cheat => { root.add-cheat-row(); }
+        remove-cheat(id) => { root.remove-cheat-row(id); }
+        cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
+        record-cheat(id) => {
+            root.recording-target = "cheat";
+            root.recording-cheat-id = id;
+            root.recorded-combo = "";
+            root.recording = true;
+        }
+        cancel => { root.show-add-edit = false; }
+        save => { root.save-form(); }
+    }
+
+    if root.recording: KeyRecorderModal {
+        recorded-combo <=> root.recorded-combo;
+        cancel => {
+            root.recording = false;
+            root.recorded-combo = "";
+        }
+        confirm => {
+            if root.recording-target == "cheat" {
+                root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
+            } else if root.recording-target == "shortcut" {
+                root.form-shortcut = root.recorded-combo;
+                root.form-shortcut-display = root.recorded-combo;
+            } else {
+                root.default-shortcut-label = root.recorded-combo;
+            }
+            root.recording = false;
+            root.recorded-combo = "";
+        }
+    }
+
+    Toast {
+        message: root.toast-message;
+        show: root.show-toast;
+    }
+}

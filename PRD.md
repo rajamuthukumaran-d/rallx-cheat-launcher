@@ -1,0 +1,112 @@
+# Rallx Cheat Launcher
+
+I want to create an app to launch trainer for game. I call the app Rallx Cheat Launcher. It will be used in ROG Ally and steam deck so it needs to be optimised for handheld gaming pc with touch screen and gamepad, it will have following screens,
+
+## Home:
+ - It will have list of cheats in a list view
+ - The list row will have
+        - Trainer logo from exe
+        - Name
+        - Version
+        - Size
+        - Play icon
+- When edit is enable following will also show up in the list
+        - Copy Icon (to copy launch script)
+        - Edit icon (Open Add screen and fill the existing data and change the title to edit)
+        - Delete icon (Delete the trainer. Show confirmation before performing the action)
+- A add (open add trainer page) and gear icon (open settings page) at the top
+- Gamepad navigation
+        - A - launch
+        - X - Edit
+        - Y - search
+        - Select - Delete (Show confirmation popup)
+        - Right bumper - copy launch script if configured
+        - Start - open settings
+        - checkbox to close the app after launching the trainer
+Instructions to aquire design:
+```
+## Stitch Instructions
+
+Get the images and code for the following Stitch project's screens:
+
+## Project
+Title: Rallx Cheater
+ID: 1326176191779115464
+
+## Screens:
+1. Home - Rallx Cheater
+    ID: 53f859080787408786d4b2345f08471d
+
+Use a utility like `curl -L` to download the hosted URLs.
+```
+
+
+## Settings:
+- It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
+- Theme will have accent, background and style
+- Option to close the app after launching trainer
+Instructions to aquire design:
+```
+## Stitch Instructions
+
+Get the images and code for the following Stitch project's screens:
+
+## Project
+Title: Rallx Cheater
+ID: 1326176191779115464
+
+## Screens:
+1. Settings - Rallx Cheater
+    ID: c1d921289055422ca52315685c092801
+
+Use a utility like `curl -L` to download the hosted URLs.
+```
+
+## Add/Edit trainer popup:
+- This is a popup when a trainer is dragged into the app or pressed add icon from the home
+- Show the selected trainer information and allow user to modify Name
+- An option to choose game exe
+- Assign shortcut to launch trainer
+- Add list of cheats need to enable (Will be a list containing key or key combination eg, Numpad 1, ctrl + numberpad 3, etc)
+- When adding cheats to enable allow user to enter key or key combination by clicking on a record button
+Instructions to aquire design:
+```
+## Stitch Instructions
+
+Get the images and code for the following Stitch project's screens:
+
+## Project
+Title: Rallx Cheater
+ID: 1326176191779115464
+
+## Screens:
+1. Add Trainer - Rallx Cheater
+    ID: 483335a7be6146019b8d6264db8c9814
+
+Use a utility like `curl -L` to download the hosted URLs.
+```
+
+## Functionality,
+- List all the trainer in a selected folder
+- Clicking on the list or the play button or pressing A from gamepad will launch the trainer
+- Optionally the app also have a feature to create launch option that make the app run in background and on press of a button, it will open the selected app
+    - Launch option will look like following,
+        - ```rallx-cheater.exe --launch="rdr2-trainer.exe" --hotkey="insert" --defaultcheat="ctrl+num1,num3,ctrl+num5"```
+        - When the app launched with above launch option, the app UI doesn't show up instead it will open as a system tray icon (It will open in background)
+        - When user hit insert, the app will launch the trainer rdr2-trainer.exe and programically press keys ctrl+num1, num3 and ctrl+num5
+        - NOTE: rdr2-trainer.exe doesn't need the path, the app should launch the exe based on the selected path in the configuration as all the trainer reside inside single path
+    - When adding a trainer user can optinally configure hotkey to launch the trainer in the middle of the game
+    - Can also configure default cheats from the trainer (By pressing keys and key combination programically)
+- Dragging and dropping a exe will show add trainer window and confirming will move that file inside the trainer folder
+- When adding a trainer, user has option to set launch option and default trainer shotcuts. Selecting these option only save them. When copy a launch script will be generated based on these selection
+- Globally in settings and when launching individual trainer there is an option to close the app after launching the trainer. If enabled it will close the app once the trainer is launched and default cheats are entered
+- If a trainer is launched from the app where the trainer had close after launch checked. It should be ignored and the app should follow if it is checked globally inside settings page. The individual "close after launch" option is only for generating launch option. If the launch option have "--closeafterlaunch" then it should close after launching and activating default cheats
+
+## Design,
+- Use Google Stitch MCP server of project of title "Rallx Cheater"
+- Instructions to fetch the particular screen is mentioned in their selection
+- Download the mockups inside mockups folder and hide it in .gitignore
+
+## Tech stack
+- Rust with slint
+- Store configs inside config.json file inside the selected trainer folder

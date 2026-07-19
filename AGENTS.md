@@ -49,7 +49,7 @@ src/
   gamepad.rs         # gilrs polling -> UI navigation events
 ui/
   *.slint           # Slint component/screen files
-mockups/            # downloaded Stitch design references — gitignored, never committed
+mockups/            # contains mockup.html for visual reference
 ```
 
 Keep UI (`.slint`) and app logic (`.rs`) cleanly separated: business logic
@@ -58,15 +58,10 @@ embedded in Slint callbacks beyond simple event wiring.
 
 ## Design assets workflow
 
-Designs come from the Google Stitch MCP server, project **"Rallx Cheater"**
-(ID `1326176191779115464`). Each screen in `PRD.md` includes the Stitch screen
-ID and fetch instructions. When implementing a screen:
+Designs are located in [`mockups/mockup.html`](./mockups/mockup.html). When implementing a screen:
 
-1. Fetch images/code for that screen via the Stitch MCP tools using the ID in `PRD.md`.
-2. Save downloaded assets under `mockups/` (create it if missing).
-3. Ensure `mockups/` is listed in `.gitignore` — never commit raw mockup exports.
-4. Treat the Stitch output as a visual reference, not literal code to paste in —
-   translate it into idiomatic Slint, since Stitch doesn't generate Slint directly.
+1. Open `mockups/mockup.html` in a web browser to view the visual layout, styling, and design references.
+2. Treat the mockup as a visual reference, not literal code to paste in — translate it into idiomatic Slint, since the HTML structure does not map directly to Slint.
 
 ## Core functional requirements to keep in mind
 
@@ -129,7 +124,7 @@ There is no test suite or CI config yet — if you add one, keep it Windows-only
 
 - Don't store config.json anywhere other than inside the selected trainer
   folder — that's an explicit product requirement, not an implementation detail.
-- Don't commit anything under `mockups/`.
+- Don't commit anything under `mockups/temp`.
 - Don't build a general plugin/extension system, telemetry, or auto-update
   machinery — out of scope unless requested.
 - Don't silently swallow the launch-option CLI args into the normal UI code

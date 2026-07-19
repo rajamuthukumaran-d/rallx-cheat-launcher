@@ -1,0 +1,267 @@
+import { Theme } from "../theme.slint";
+import { TrainerItem } from "../types.slint";
+import { IconButton } from "../components/icon-button.slint";
+import { TrainerRow } from "../components/trainer-row.slint";
+import { GamepadHintBar } from "../components/gamepad-hint-bar.slint";
+import { ListView } from "std-widgets.slint";
+
+export component HomeScreen inherits Rectangle {
+    in-out property <bool> edit-mode: false;
+    in-out property <bool> show-search: false;
+    in-out property <string> search-query: "";
+
+    in property <[TrainerItem]> visible-trainers;
+    in property <int> trainer-count;
+    in property <string> total-size-label;
+
+    callback open-add();
+    callback open-settings();
+    callback launch-trainer(int);
+    callback edit-trainer(int);
+    callback delete-trainer(int);
+    callback copy-trainer(int);
+    callback search-changed(string);
+
+    background: Theme.bg;
+
+    VerticalLayout {
+        // Header
+        Rectangle {
+            height: 76px;
+
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
+            }
+
+            HorizontalLayout {
+                padding-left: 28px;
+                padding-right: 28px;
+                spacing: 18px;
+                cross-axis-alignment: center;
+
+                Rectangle {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: Theme.accent;
+                    Text {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        text: "R";
+                        color: Theme.on-accent;
+                        font-size: 19px;
+                        font-weight: 700;
+                    }
+                }
+
+                Text {
+                    text: "RALLX CHEATER";
+                    color: Theme.text;
+                    font-size: 22px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    // Always present (never conditional) so its stretch
+                    // factor reliably claims the leftover header width,
+                    // pushing everything after it to the right edge; only
+                    // its contents/styling swap based on show-search.
+                    horizontal-stretch: 1;
+                    height: 44px;
+                    background: root.show-search ? Theme.panel2 : transparent;
+                    border-width: root.show-search ? 1px : 0px;
+                    border-color: Theme.accent;
+                    border-radius: 8px;
+
+                    if root.show-search: HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 10px;
+                        cross-axis-alignment: center;
+
+                        Image {
+                            source: @image-url("../../assets/images/icons/search.svg");
+                            width: 18px;
+                            height: 18px;
+                            colorize: Theme.text-dim;
+                            vertical-stretch: 0;
+                        }
+
+                        TextInput {
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            single-line: true;
+                            text <=> root.search-query;
+                            color: Theme.text;
+                            font-size: 17px;
+                            edited => { root.search-changed(self.text); }
+                            init => { self.focus(); }
+                        }
+
+                        IconButton {
+                            icon: @image-url("../../assets/images/icons/close.svg");
+                            icon-size: 14px;
+                            button-size: 28px;
+                            bordered: false;
+                            button-bg: transparent;
+                            icon-color: Theme.text-dim;
+                            tooltip-text: "Close search";
+                            clicked => {
+                                root.show-search = false;
+                                root.search-query = "";
+                                root.search-changed("");
+                            }
+                        }
+                    }
+                }
+
+                if !root.show-search: IconButton {
+                    icon: @image-url("../../assets/images/icons/search.svg");
+                    icon-size: 17px;
+                    button-size: 40px;
+                    icon-color: Theme.text-dim;
+                    tooltip-text: "Search trainers";
+                    clicked => { root.show-search = true; }
+                }
+
+                IconButton {
+                    icon: @image-url("../../assets/images/icons/edit.svg");
+                    icon-size: 17px;
+                    button-size: 40px;
+                    bordered: !root.edit-mode;
+                    button-bg: root.edit-mode ? Theme.accent : Theme.panel2;
+                    icon-color: root.edit-mode ? Theme.on-accent : Theme.text-dim;
+                    tooltip-text: root.edit-mode ? "Done editing" : "Edit trainers";
+                    clicked => { root.edit-mode = !root.edit-mode; }
+                }
+
+                IconButton {
+                    icon: @image-url("../../assets/images/icons/add.svg");
+                    icon-size: 20px;
+                    button-size: 40px;
+                    bordered: false;
+                    button-bg: Theme.accent;
+                    icon-color: Theme.on-accent;
+                    tooltip-text: "Add trainer";
+                    clicked => { root.open-add(); }
+                }
+
+                IconButton {
+                    icon: @image-url("../../assets/images/icons/settings.svg");
+                    icon-size: 19px;
+                    button-size: 40px;
+                    icon-color: Theme.text;
+                    tooltip-text: "Settings";
+                    clicked => { root.open-settings(); }
+                }
+            }
+        }
+
+        // Body
+        Rectangle {
+            vertical-stretch: 1;
+
+            if visible-trainers.length == 0: VerticalLayout {
+                alignment: center;
+                cross-axis-alignment: center;
+                spacing: 18px;
+
+                Rectangle {
+                    width: 88px;
+                    height: 88px;
+                    border-radius: 16px;
+                    background: Theme.panel2;
+                    border-width: 1.5px;
+                    border-color: Theme.border;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        source: @image-url("../../assets/images/icons/empty-folder.svg");
+                        width: 40px;
+                        height: 40px;
+                        colorize: Theme.text-dim;
+                    }
+                }
+
+                Text {
+                    text: "No trainers yet";
+                    color: Theme.text;
+                    font-size: 22px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    width: 340px;
+                    text: "Drag a trainer .exe into this window, or add one manually to get started.";
+                    color: Theme.text-dim;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    background: Theme.accent;
+                    border-radius: 8px;
+                    width: add-btn-layout.min-width;
+                    height: add-btn-layout.min-height;
+
+                    add-empty-touch := TouchArea {
+                        clicked => { root.open-add(); }
+                    }
+
+                    add-btn-layout := HorizontalLayout {
+                        padding-left: 22px;
+                        padding-right: 22px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+
+                        Image {
+                            source: @image-url("../../assets/images/icons/add.svg");
+                            width: 18px;
+                            height: 18px;
+                            colorize: Theme.on-accent;
+                        }
+
+                        Text {
+                            text: "Add trainer";
+                            color: Theme.on-accent;
+                            font-size: 16px;
+                            font-weight: 600;
+                        }
+                    }
+                }
+            }
+
+            if visible-trainers.length > 0: VerticalLayout {
+                padding-left: 28px;
+                padding-right: 28px;
+                padding-top: 14px;
+                padding-bottom: 24px;
+
+                ListView {
+                    for t[i] in root.visible-trainers: TrainerRow {
+                        trainer: t;
+                        edit-mode: root.edit-mode;
+                        launch => { root.launch-trainer(t.id); }
+                        edit => { root.edit-trainer(t.id); }
+                        delete => { root.delete-trainer(t.id); }
+                        copy => { root.copy-trainer(t.id); }
+                    }
+                }
+            }
+        }
+
+        GamepadHintBar {
+            trainer-count: root.trainer-count;
+            total-size-label: root.total-size-label;
+        }
+    }
+}

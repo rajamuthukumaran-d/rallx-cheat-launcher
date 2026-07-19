@@ -1,0 +1,17 @@
+export struct CheatEntry {
+    id: int,
+    label: string,
+    key: string,
+}
+
+export struct TrainerItem {
+    id: int,
+    name: string,
+    version: string,
+    size: string,
+    exe: string,
+    shortcut: string,
+    color: color,
+    letter: string,
+    cheats: [CheatEntry],
+}

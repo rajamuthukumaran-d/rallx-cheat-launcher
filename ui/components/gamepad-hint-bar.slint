@@ -1,0 +1,87 @@
+import { Theme } from "../theme.slint";
+
+component Hint inherits HorizontalLayout {
+    in property <image> icon;
+    in property <string> label;
+    in property <brush> icon-color;
+
+    horizontal-stretch: 0;
+    spacing: 8px;
+    alignment: center;
+    cross-axis-alignment: center;
+
+    Image {
+        source: root.icon;
+        width: 32px;
+        height: 32px;
+        colorize: root.icon-color;
+    }
+
+    Text {
+        text: root.label;
+        color: Theme.text-dim;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+export component GamepadHintBar inherits Rectangle {
+    in property <int> trainer-count;
+    in property <string> total-size-label;
+
+    height: 46px;
+    background: Theme.panel;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 28px;
+        spacing: 26px;
+        cross-axis-alignment: center;
+
+        Text {
+            text: trainer-count + " trainers · " + total-size-label + " total";
+            color: Theme.text-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/A.svg");
+            label: "Launch";
+            icon-color: #4caf50;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/X.svg");
+            label: "Edit";
+            icon-color: #4a90e2;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Y.svg");
+            label: "Search";
+            icon-color: #e2c94a;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/View.svg");
+            label: "Delete";
+            icon-color: Theme.text-dim;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Right Bumper.svg");
+            label: "Copy script";
+            icon-color: Theme.text-dim;
+        }
+        Hint {
+            icon: @image-url("../../assets/images/gamepad/Menu.svg");
+            label: "Settings";
+            icon-color: Theme.text-dim;
+        }
+    }
+}
