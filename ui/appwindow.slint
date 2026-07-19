@@ -40,8 +40,6 @@ export component AppWindow inherits Window {
     in-out property <int> editing-id: -1;
     in-out property <string> form-title: "Add trainer";
     in-out property <string> form-save-label: "Add trainer";
-    in-out property <color> form-color: Theme.accent;
-    in-out property <string> form-letter: "?";
     in-out property <string> form-name: "";
     in-out property <string> form-exe-display: "No executable selected";
     in-out property <string> form-shortcut: "";
@@ -121,8 +119,6 @@ export component AppWindow inherits Window {
     if root.show-add-edit: AddEditTrainerModal {
         title-text: root.form-title;
         save-label: root.form-save-label;
-        form-color: root.form-color;
-        form-letter: root.form-letter;
         form-name <=> root.form-name;
         form-exe-display: root.form-exe-display;
         form-shortcut-display: root.form-shortcut-display;

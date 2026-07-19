@@ -199,8 +199,6 @@ fn open_add_form(app: &AppWindow) {
     app.set_editing_id(-1);
     app.set_form_title("Add trainer".into());
     app.set_form_save_label("Add trainer".into());
-    app.set_form_color(row_color(0));
-    app.set_form_letter("?".into());
     app.set_form_name("".into());
     app.set_form_exe_display("No executable selected".into());
     app.set_form_shortcut("".into());
@@ -213,8 +211,6 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_editing_id(trainer.id);
     app.set_form_title("Edit trainer".into());
     app.set_form_save_label("Save changes".into());
-    app.set_form_color(trainer.color);
-    app.set_form_letter(trainer.letter.clone());
     app.set_form_name(trainer.name.clone());
     app.set_form_exe_display(trainer.exe.clone());
     app.set_form_shortcut(trainer.shortcut.clone());
