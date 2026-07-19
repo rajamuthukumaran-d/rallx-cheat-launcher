@@ -124,7 +124,7 @@ There is no test suite or CI config yet — if you add one, keep it Windows-only
 
 - Don't store config.json anywhere other than inside the selected trainer
   folder — that's an explicit product requirement, not an implementation detail.
-- Don't commit anything under `mockups/`.
+- Don't commit anything under `mockups/temp`.
 - Don't build a general plugin/extension system, telemetry, or auto-update
   machinery — out of scope unless requested.
 - Don't silently swallow the launch-option CLI args into the normal UI code
