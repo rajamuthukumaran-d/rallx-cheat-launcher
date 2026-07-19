@@ -244,6 +244,22 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     {
         let app_weak = app.as_weak();
         let state = state.clone();
+        app.on_refresh_trainers(move || {
+            let app = app_weak.unwrap();
+            if state.config.borrow().trainer_folder.is_none() {
+                show_toast(&app, "No trainer folder selected");
+                return;
+            }
+            let items = rescan_trainer_folder(&state);
+            *state.trainers.borrow_mut() = items;
+            refresh_trainer_list(&app, &state);
+            show_toast(&app, "Trainer list refreshed");
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_copy_script(move |id| {
             let app = app_weak.unwrap();
             if let Some(trainer) = find_trainer(&state, id) {

@@ -55,6 +55,7 @@ export component AppWindow inherits Window {
     in-out property <string> toast-message: "";
 
     callback launch-trainer(int);
+    callback refresh-trainers();
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
@@ -87,6 +88,7 @@ export component AppWindow inherits Window {
 
         open-add => { root.open-add(); }
         open-settings => { root.view = AppView.settings; }
+        refresh => { root.refresh-trainers(); }
         launch-trainer(id) => { root.launch-trainer(id); }
         edit-trainer(id) => { root.open-edit(id); }
         delete-trainer(id) => { root.request-delete(id); }

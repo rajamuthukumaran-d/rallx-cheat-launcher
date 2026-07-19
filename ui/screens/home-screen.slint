@@ -16,6 +16,7 @@ export component HomeScreen inherits Rectangle {
 
     callback open-add();
     callback open-settings();
+    callback refresh();
     callback launch-trainer(int);
     callback edit-trainer(int);
     callback delete-trainer(int);
@@ -126,6 +127,15 @@ export component HomeScreen inherits Rectangle {
                     icon-color: Theme.text-dim;
                     tooltip-text: "Search trainers";
                     clicked => { root.show-search = true; }
+                }
+
+                IconButton {
+                    icon: @image-url("../../assets/images/icons/refresh.svg");
+                    icon-size: 17px;
+                    button-size: 40px;
+                    icon-color: Theme.text-dim;
+                    tooltip-text: "Refresh trainer list";
+                    clicked => { root.refresh(); }
                 }
 
                 IconButton {
