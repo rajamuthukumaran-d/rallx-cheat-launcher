@@ -2,16 +2,17 @@
 
 // UI-only prototype state: an in-memory trainer list wired to the Slint UI so
 // every screen (Home, Settings, Add/Edit, Delete confirm, key recorder) is
-// fully interactive. No filesystem discovery, launching, or hotkey
-// registration happens here yet - see trainer.rs/hotkey.rs for those, which
-// this module deliberately does not call into.
+// fully interactive. Trainer folder selection and discovery are real
+// (see trainer::sync_trainer_configs); launching and hotkey registration are
+// not wired up yet - see trainer.rs/hotkey.rs for those.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::{AppWindow, CheatEntry, TrainerItem};
+use crate::config::{AppConfig, TrainerConfig};
+use crate::{trainer, AppWindow, CheatEntry, TrainerItem};
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
     (0x5b, 0x8c, 0xff),
@@ -26,6 +27,7 @@ struct AppState {
     trainers: RefCell<Vec<TrainerItem>>,
     next_trainer_id: Cell<i32>,
     next_cheat_id: Cell<i32>,
+    config: RefCell<AppConfig>,
 }
 
 fn row_color(index: usize) -> Color {
@@ -74,83 +76,51 @@ fn make_trainer(
     }
 }
 
-fn sample_trainers(state: &AppState) -> Vec<TrainerItem> {
-    vec![
-        make_trainer(
-            state,
-            "Elden Ring +25 Trainer",
-            "3.2.1",
-            "4.1 MB",
-            "EldenRing.exe",
-            "Ctrl + F1",
-            vec![
-                make_cheat(state, "Infinite Health", "Numpad 1"),
-                make_cheat(state, "Infinite Stamina", "Numpad 2"),
-                make_cheat(state, "One Hit Kill", "Numpad 3"),
-            ],
-        ),
-        make_trainer(
-            state,
-            "Cyberpunk 2077 +30 Trainer",
-            "2.13.0",
-            "5.8 MB",
-            "Cyberpunk2077.exe",
-            "Ctrl + F2",
-            vec![
-                make_cheat(state, "Infinite Health", "Numpad 1"),
-                make_cheat(state, "Infinite Ammo", "Numpad 4"),
-                make_cheat(state, "God Mode", "Numpad 0"),
-            ],
-        ),
-        make_trainer(
-            state,
-            "Baldur's Gate 3 Trainer",
-            "1.8.0",
-            "2.9 MB",
-            "bg3.exe",
-            "Alt + F3",
-            vec![
-                make_cheat(state, "Infinite Gold", "Numpad 5"),
-                make_cheat(state, "Set Level", "Numpad 6"),
-            ],
-        ),
-        make_trainer(
-            state,
-            "Hogwarts Legacy +20 Trainer",
-            "1.4.2",
-            "3.6 MB",
-            "HogwartsLegacy.exe",
-            "Ctrl + F4",
-            vec![
-                make_cheat(state, "Infinite Health", "Numpad 1"),
-                make_cheat(state, "No Cooldown", "Numpad 7"),
-            ],
-        ),
-        make_trainer(
-            state,
-            "Starfield Trainer",
-            "0.9.3",
-            "2.2 MB",
-            "Starfield.exe",
-            "Ctrl + F5",
-            vec![
-                make_cheat(state, "Infinite Credits", "Numpad 8"),
-                make_cheat(state, "Infinite Oxygen", "Numpad 9"),
-            ],
-        ),
-        make_trainer(
-            state,
-            "Diablo IV +18 Trainer",
-            "1.2.0",
-            "3.0 MB",
-            "Diablo4.exe",
-            "Alt + F6",
-            vec![
-                make_cheat(state, "Infinite Health", "Numpad 1"),
-                make_cheat(state, "Infinite Gold", "Numpad 2"),
-            ],
-        ),
-    ]
+fn format_size(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+}
+
+fn config_to_trainer_item(state: &AppState, cfg: &TrainerConfig) -> TrainerItem {
+    let cheats: Vec<CheatEntry> = cfg
+        .default_cheats
+        .iter()
+        .map(|key| make_cheat(state, "", key))
+        .collect();
+    make_trainer(
+        state,
+        &cfg.name,
+        &cfg.version,
+        &format_size(cfg.size_bytes),
+        &cfg.filename,
+        cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
+        cheats,
+    )
+}
+
+fn trainer_items_from_config(state: &AppState, config: &AppConfig) -> Vec<TrainerItem> {
+    config
+        .trainers
+        .iter()
+        .map(|cfg| config_to_trainer_item(state, cfg))
+        .collect()
+}
+
+/// Re-scans the configured trainer folder, reconciling discovered files
+/// against saved metadata, persists the result, and returns the fresh
+/// display list. No-op (returns the existing list) if no folder is set.
+fn rescan_trainer_folder(state: &AppState) -> Vec<TrainerItem> {
+    let mut config = state.config.borrow_mut();
+    let Some(folder) = config.trainer_folder.clone() else {
+        drop(config);
+        return trainer_items_from_config(state, &state.config.borrow());
+    };
+
+    if let Ok(trainers) = trainer::sync_trainer_configs(&config.trainers, &folder) {
+        config.trainers = trainers;
+        let _ = crate::config::save_config(&config);
+    }
+
+    trainer_items_from_config(state, &config)
 }
 
 fn parse_leading_mb(size: &str) -> f64 {
@@ -227,16 +197,19 @@ fn build_launch_script(trainer: &TrainerItem) -> String {
     script
 }
 
-pub fn wire(app: &AppWindow, configured_folder: Option<std::path::PathBuf>) {
+pub fn wire(app: &AppWindow, config: AppConfig) {
     let state = Rc::new(AppState {
         trainers: RefCell::new(Vec::new()),
         next_trainer_id: Cell::new(1),
         next_cheat_id: Cell::new(100),
+        config: RefCell::new(config),
     });
-    *state.trainers.borrow_mut() = sample_trainers(&state);
+
+    let items = rescan_trainer_folder(&state);
+    *state.trainers.borrow_mut() = items;
     refresh_trainer_list(app, &state);
 
-    let folder_label = match configured_folder {
+    let folder_label = match state.config.borrow().trainer_folder.clone() {
         Some(folder) => folder.display().to_string(),
         None => "No folder selected".to_string(),
     };
@@ -440,9 +413,20 @@ pub fn wire(app: &AppWindow, configured_folder: Option<std::path::PathBuf>) {
 
     {
         let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_browse_folder(move || {
             let app = app_weak.unwrap();
-            show_toast(&app, "Folder picker would open here");
+            let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+                return;
+            };
+
+            state.config.borrow_mut().trainer_folder = Some(folder.clone());
+            let items = rescan_trainer_folder(&state);
+            *state.trainers.borrow_mut() = items;
+            refresh_trainer_list(&app, &state);
+
+            app.set_folder_path(folder.display().to_string().into());
+            show_toast(&app, "Trainer folder updated");
         });
     }
 

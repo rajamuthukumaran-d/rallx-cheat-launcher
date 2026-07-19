@@ -44,8 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let (_config, folder_path) = config::load_config();
-    app_state::wire(&app, folder_path);
+    let (mut config, folder_path) = config::load_config();
+    config.trainer_folder = folder_path;
+    app_state::wire(&app, config);
 
     app.run()?;
     Ok(())

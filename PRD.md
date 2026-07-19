@@ -23,44 +23,11 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
         - Right bumper - copy launch script if configured
         - Start - open settings
         - checkbox to close the app after launching the trainer
-Instructions to aquire design:
-```
-## Stitch Instructions
-
-Get the images and code for the following Stitch project's screens:
-
-## Project
-Title: Rallx Cheater
-ID: 1326176191779115464
-
-## Screens:
-1. Home - Rallx Cheater
-    ID: 53f859080787408786d4b2345f08471d
-
-Use a utility like `curl -L` to download the hosted URLs.
-```
-
 
 ## Settings:
 - It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
 - Theme will have accent, background and style
 - Option to close the app after launching trainer
-Instructions to aquire design:
-```
-## Stitch Instructions
-
-Get the images and code for the following Stitch project's screens:
-
-## Project
-Title: Rallx Cheater
-ID: 1326176191779115464
-
-## Screens:
-1. Settings - Rallx Cheater
-    ID: c1d921289055422ca52315685c092801
-
-Use a utility like `curl -L` to download the hosted URLs.
-```
 
 ## Add/Edit trainer popup:
 - This is a popup when a trainer is dragged into the app or pressed add icon from the home
@@ -69,22 +36,6 @@ Use a utility like `curl -L` to download the hosted URLs.
 - Assign shortcut to launch trainer
 - Add list of cheats need to enable (Will be a list containing key or key combination eg, Numpad 1, ctrl + numberpad 3, etc)
 - When adding cheats to enable allow user to enter key or key combination by clicking on a record button
-Instructions to aquire design:
-```
-## Stitch Instructions
-
-Get the images and code for the following Stitch project's screens:
-
-## Project
-Title: Rallx Cheater
-ID: 1326176191779115464
-
-## Screens:
-1. Add Trainer - Rallx Cheater
-    ID: 483335a7be6146019b8d6264db8c9814
-
-Use a utility like `curl -L` to download the hosted URLs.
-```
 
 ## Functionality,
 - List all the trainer in a selected folder
@@ -103,7 +54,7 @@ Use a utility like `curl -L` to download the hosted URLs.
 - If a trainer is launched from the app where the trainer had close after launch checked. It should be ignored and the app should follow if it is checked globally inside settings page. The individual "close after launch" option is only for generating launch option. If the launch option have "--closeafterlaunch" then it should close after launching and activating default cheats
 
 ## Design,
-- Use Google Stitch MCP server of project of title "Rallx Cheater"
+- Use @mockups/mockup.html for mockup
 - Instructions to fetch the particular screen is mentioned in their selection
 - Download the mockups inside mockups folder and hide it in .gitignore
 
