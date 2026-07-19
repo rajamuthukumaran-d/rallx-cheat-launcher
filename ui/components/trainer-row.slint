@@ -41,14 +41,24 @@ export component TrainerRow inherits Rectangle {
                 height: Theme.row-icon-size;
                 border-radius: 9px;
                 background: trainer.color;
+                clip: true;
 
-                Text {
+                if !trainer.has-icon: Text {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     text: trainer.letter;
                     color: Theme.on-accent;
                     font-size: 18px;
                     font-weight: 700;
+                }
+
+                if trainer.has-icon: Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: trainer.icon;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    image-fit: contain;
                 }
             }
 
