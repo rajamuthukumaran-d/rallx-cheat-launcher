@@ -322,13 +322,15 @@ export component AppWindow inherits Window {
     }
 
     // X: edits the focused trainer, or - while the virtual keyboard is open -
-    // deletes the last typed character instead.
+    // deletes the last typed character instead. Like the other trainer-row
+    // actions (delete/copy) this only applies on the home screen; the view
+    // check stops a Settings-screen press from acting on the stale home focus.
     public function edit-focused-trainer() {
         if root.show-keyboard {
             root.keyboard-backspace();
             return;
         }
-        if root.popup-open() {
+        if root.popup-open() || root.view != AppView.home {
             return;
         }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
@@ -337,7 +339,7 @@ export component AppWindow inherits Window {
     }
 
     public function delete-focused-trainer() {
-        if root.popup-open() {
+        if root.popup-open() || root.view != AppView.home {
             return;
         }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
@@ -346,7 +348,7 @@ export component AppWindow inherits Window {
     }
 
     public function copy-focused-trainer() {
-        if root.popup-open() {
+        if root.popup-open() || root.view != AppView.home {
             return;
         }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
@@ -547,9 +549,9 @@ export component AppWindow inherits Window {
     // Cancel/Save row, form-sub-index) to whichever control it represents;
     // must stay in sync with form-item-count()/form-sub-count() and
     // AddEditTrainerModal's layout. The virtual keyboard only opens for an
-    // actual gamepad press - HomeScreen's FocusScope keeps real keyboard
-    // focus even while this form is open, so a physical Return on the Name/
-    // label field must not pop up the on-screen keyboard on top of it.
+    // actual gamepad press - AppWindow's key-scope keeps real keyboard focus
+    // even while this form is open, so a physical Return on the Name/label
+    // field must not pop up the on-screen keyboard on top of it.
     function activate-form-focused(via-gamepad: bool) {
         if root.form-focused-index == 0 {
             if via-gamepad {
@@ -649,6 +651,16 @@ export component AppWindow inherits Window {
         } else if root.empty-action-focused && root.visible-trainers.length == 0 {
             root.activate-empty-action();
         } else {
+            if root.empty-action-focused {
+                // The list was repopulated while focus stayed on the now-hidden
+                // empty-state button (same self-heal as move-selection); recover
+                // by selecting the first row rather than no-opping on a stale
+                // focused-index.
+                root.empty-action-focused = false;
+                if root.focused-index < 0 {
+                    root.focused-index = 0;
+                }
+            }
             root.launch-focused-trainer();
         }
     }

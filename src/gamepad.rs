@@ -18,8 +18,8 @@
 // same buttons do double duty instead of needing dedicated ones. A passes
 // via-gamepad=true so AppWindow knows this accept came from an actual
 // gamepad press and may open the virtual keyboard — the physical Return key
-// (home-screen.slint) reuses the same dispatcher with via-gamepad=false so
-// it doesn't.
+// (handled by AppWindow's global key-scope) reuses the same dispatcher with
+// via-gamepad=false so it doesn't.
 
 use std::time::Duration;
 
