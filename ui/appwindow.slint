@@ -105,6 +105,49 @@ export component AppWindow inherits Window {
         root.view = AppView.settings;
     }
 
+    function confirm-recording() {
+        if root.recording-target == "cheat" {
+            root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
+        } else if root.recording-target == "shortcut" {
+            root.form-shortcut = root.recorded-combo;
+            root.form-shortcut-display = root.recorded-combo;
+        } else {
+            root.default-shortcut-label = root.recorded-combo;
+        }
+        root.recording = false;
+        root.recorded-combo = "";
+    }
+
+    function cancel-recording() {
+        root.recording = false;
+        root.recorded-combo = "";
+    }
+
+    // Dispatches gamepad A/B to whichever popup is currently on top -
+    // key recorder, then add/edit form, then delete confirm - falling back to
+    // the home screen's own launch/no-op when nothing is open.
+    public function gamepad-accept() {
+        if root.recording {
+            root.confirm-recording();
+        } else if root.show-add-edit {
+            root.save-form();
+        } else if root.delete-confirm-id >= 0 {
+            root.confirm-delete(root.delete-confirm-id);
+        } else {
+            root.launch-focused-trainer();
+        }
+    }
+
+    public function gamepad-cancel() {
+        if root.recording {
+            root.cancel-recording();
+        } else if root.show-add-edit {
+            root.show-add-edit = false;
+        } else if root.delete-confirm-id >= 0 {
+            root.delete-confirm-id = -1;
+        }
+    }
+
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
@@ -200,22 +243,8 @@ export component AppWindow inherits Window {
 
     if root.recording: KeyRecorderModal {
         recorded-combo <=> root.recorded-combo;
-        cancel => {
-            root.recording = false;
-            root.recorded-combo = "";
-        }
-        confirm => {
-            if root.recording-target == "cheat" {
-                root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
-            } else if root.recording-target == "shortcut" {
-                root.form-shortcut = root.recorded-combo;
-                root.form-shortcut-display = root.recorded-combo;
-            } else {
-                root.default-shortcut-label = root.recorded-combo;
-            }
-            root.recording = false;
-            root.recorded-combo = "";
-        }
+        cancel => { root.cancel-recording(); }
+        confirm => { root.confirm-recording(); }
     }
 
     Toast {
