@@ -1,0 +1,100 @@
+import { Theme } from "../theme.slint";
+import { ModalBackdrop } from "../components/modal-backdrop.slint";
+import { IconButton } from "../components/icon-button.slint";
+import { KeyboardLayout } from "../keyboard-layout.slint";
+
+component Key inherits Rectangle {
+    in property <string> label;
+    in property <bool> wide: false;
+    in property <bool> active: false;
+    in property <bool> focused: false;
+    callback clicked();
+
+    width: wide ? 92px : 40px;
+    height: 40px;
+    border-radius: 6px;
+    background: root.focused ? Theme.accent : (root.active ? Theme.panel : Theme.panel2);
+    border-width: 1px;
+    border-color: root.focused ? Theme.accent : Theme.border;
+
+    Text {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        text: root.label;
+        color: root.focused ? Theme.on-accent : (root.active ? Theme.accent : Theme.text);
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component VirtualKeyboardModal inherits ModalBackdrop {
+    in property <string> preview: "";
+    in property <bool> shift: false;
+    in property <int> focused-row: 0;
+    in property <int> focused-col: 0;
+
+    callback close();
+    callback key-tapped(int, int);
+
+    function key-label(key: string) -> string {
+        if (key == "BACK") { return "⌫"; }
+        if (key == "SPACE") { return "Space"; }
+        if (key == "DONE") { return "Done"; }
+        if (key == "SHIFT") { return "⇧"; }
+        return root.shift ? key.to-uppercase() : key;
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: content.min-width + 48px;
+        height: content.min-height + 48px;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.border;
+        border-radius: 14px;
+
+        IconButton {
+            x: parent.width - self.width - 10px;
+            y: 10px;
+            icon: @image-url("../../assets/images/icons/close.svg");
+            icon-size: 14px;
+            button-size: 30px;
+            bordered: false;
+            icon-color: Theme.text-dim;
+            tooltip-text: "Close keyboard";
+            clicked => { root.close(); }
+        }
+
+        content := VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+
+            Text {
+                text: root.preview.is-empty ? "Type using the D-Pad and A" : root.preview;
+                color: root.preview.is-empty ? Theme.text-dim : Theme.text;
+                font-size: 18px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
+            for row[r] in KeyboardLayout.rows: HorizontalLayout {
+                spacing: 6px;
+                alignment: center;
+
+                for key[c] in row: Key {
+                    label: root.key-label(key);
+                    wide: key == "SPACE" || key == "SHIFT" || key == "BACK" || key == "DONE";
+                    active: key == "SHIFT" && root.shift;
+                    focused: r == root.focused-row && c == root.focused-col;
+                    clicked => { root.key-tapped(r, c); }
+                }
+            }
+        }
+    }
+}

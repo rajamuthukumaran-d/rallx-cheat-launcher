@@ -1,10 +1,12 @@
 import { Theme, Palette } from "theme.slint";
 import { TrainerItem, CheatEntry } from "types.slint";
+import { KeyboardLayout } from "keyboard-layout.slint";
 import { HomeScreen } from "screens/home-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DeleteConfirmModal } from "modals/delete-confirm-modal.slint";
 import { AddEditTrainerModal } from "modals/add-edit-trainer-modal.slint";
 import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
+import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { Toast } from "components/toast.slint";
 
 export { TrainerItem, CheatEntry }
@@ -68,6 +70,18 @@ export component AppWindow inherits Window {
     in-out property <int> recording-cheat-id: -1;
     in-out property <string> recorded-combo: "";
 
+    // Virtual keyboard: a gamepad-only alternative to typing, opened via A on
+    // a focused text field (search box, trainer name, cheat label). keyboard-
+    // target picks which underlying value keyboard-char/keyboard-backspace
+    // (handled in Rust) edit: "search" | "name" | "cheat".
+    in-out property <bool> show-keyboard: false;
+    in-out property <string> keyboard-target: "";
+    in-out property <int> keyboard-cheat-id: -1;
+    in-out property <string> keyboard-preview: "";
+    in-out property <bool> keyboard-shift: false;
+    in-out property <int> keyboard-row: 0;
+    in-out property <int> keyboard-col: 0;
+
     in-out property <bool> show-toast: false;
     in-out property <string> toast-message: "";
 
@@ -85,6 +99,12 @@ export component AppWindow inherits Window {
     // (list navigation, edit/delete/copy, search, settings) must no-op so a
     // popup press can't leak through to whatever is behind it.
     function popup-open() -> bool {
+        return root.other-popup-open() || root.show-keyboard;
+    }
+
+    // popup-open() minus the keyboard itself, for the few actions (namely Y/
+    // open-search-keyboard) that need to run *while* the keyboard is open.
+    function other-popup-open() -> bool {
         return root.recording || root.show-add-edit || root.delete-confirm-id >= 0;
     }
 
@@ -176,10 +196,24 @@ export component AppWindow inherits Window {
         root.home-header-index = max(0, min(root.home-header-index + delta, 4));
     }
 
+    function move-keyboard-vertical(delta: int) {
+        root.keyboard-row = max(0, min(root.keyboard-row + delta, KeyboardLayout.rows.length - 1));
+        root.keyboard-col = min(root.keyboard-col, KeyboardLayout.rows[root.keyboard-row].length - 1);
+    }
+
+    function move-keyboard-horizontal(delta: int) {
+        root.keyboard-col = max(0, min(root.keyboard-col + delta, KeyboardLayout.rows[root.keyboard-row].length - 1));
+    }
+
     // Left/right: cycles the focused settings row's value, moves between
-    // fields/buttons within the add/edit form's focused row, or moves
-    // between header buttons on the home screen.
+    // fields/buttons within the add/edit form's focused row, moves between
+    // header buttons on the home screen, or moves across the virtual
+    // keyboard's key grid.
     public function move-horizontal(delta: int) {
+        if root.show-keyboard {
+            root.move-keyboard-horizontal(delta);
+            return;
+        }
         if root.recording || root.delete-confirm-id >= 0 {
             return;
         }
@@ -193,9 +227,15 @@ export component AppWindow inherits Window {
     }
 
     public function move-selection(delta: int) {
-        // The key recorder and delete confirm have nothing to navigate, so
-        // they still block navigation entirely; the add/edit form is itself
-        // navigable, so it's handled instead of blocked.
+        // The virtual keyboard takes over up/down for its own key grid
+        // whenever it's open, even over an add/edit form or settings screen
+        // behind it. The key recorder and delete confirm have nothing to
+        // navigate, so they still block navigation entirely; the add/edit
+        // form is itself navigable, so it's handled instead of blocked.
+        if root.show-keyboard {
+            root.move-keyboard-vertical(delta);
+            return;
+        }
         if root.recording || root.delete-confirm-id >= 0 {
             return;
         }
@@ -241,7 +281,13 @@ export component AppWindow inherits Window {
         }
     }
 
+    // X: edits the focused trainer, or - while the virtual keyboard is open -
+    // deletes the last typed character instead.
     public function edit-focused-trainer() {
+        if root.show-keyboard {
+            root.keyboard-backspace();
+            return;
+        }
         if root.popup-open() {
             return;
         }
@@ -279,6 +325,34 @@ export component AppWindow inherits Window {
         }
     }
 
+    // Y: the dedicated "start typing into search" shortcut - opens the
+    // search box (if closed) and the virtual keyboard together, or just
+    // brings the keyboard back if it was closed while search stayed open.
+    // While the keyboard is already open, Y instead types a space (see
+    // gamepad.rs), which is why this checks show-keyboard before the usual
+    // other-popup-open() guard rather than reusing popup-open().
+    public function open-search-keyboard() {
+        if root.show-keyboard {
+            root.keyboard-char(" ");
+            return;
+        }
+        if root.other-popup-open() || root.view != AppView.home {
+            return;
+        }
+        root.show-search = true;
+        root.home-header-focused = true;
+        root.home-header-index = 0;
+        root.open-keyboard("search", -1, root.search-query);
+    }
+
+    // True while gamepad/keyboard focus is actually sitting on the search
+    // box (header index 0) - as opposed to just "search happens to be open,
+    // but focus moved elsewhere" - so RT doesn't reach across the screen and
+    // reopen the keyboard while e.g. a trainer row is focused instead.
+    function search-focused() -> bool {
+        return root.home-header-focused && root.home-header-index == 0;
+    }
+
     public function open-settings-view() {
         if root.popup-open() {
             return;
@@ -287,11 +361,77 @@ export component AppWindow inherits Window {
         root.view = AppView.settings;
     }
 
+    function open-keyboard(target: string, cheat-id: int, initial-text: string) {
+        root.keyboard-target = target;
+        root.keyboard-cheat-id = cheat-id;
+        root.keyboard-preview = initial-text;
+        root.keyboard-row = 0;
+        root.keyboard-col = 0;
+        root.keyboard-shift = false;
+        root.show-keyboard = true;
+    }
+
+    function close-keyboard() {
+        root.show-keyboard = false;
+    }
+
+    // LT held: momentary shift, independent of the on-screen SHIFT key's
+    // toggle/lock - releasing LT always drops back to lowercase.
+    public function keyboard-shift-hold(held: bool) {
+        if root.show-keyboard {
+            root.keyboard-shift = held;
+        }
+    }
+
+    // RT: while the keyboard is open (search, name, or a cheat label),
+    // closes it, same as Done/B. While the search box specifically is open
+    // *and* still has focus, RT instead reopens it - so RT toggles the
+    // keyboard back and forth without touching the search bar itself, but
+    // won't reach across the screen and pop it open if focus has since moved
+    // to, say, a trainer row.
+    public function keyboard-right-trigger() {
+        if root.show-keyboard {
+            root.close-keyboard();
+        } else if root.show-search && root.search-focused() {
+            root.open-keyboard("search", -1, root.search-query);
+        }
+    }
+
+    // Maps (keyboard-row, keyboard-col) to whichever key it represents, per
+    // KeyboardLayout.rows; must stay in sync with VirtualKeyboardModal's
+    // rendering. keyboard-char/keyboard-backspace are handled in Rust, which
+    // owns the actual string editing and writes the result back to whichever
+    // field keyboard-target names.
+    function activate-keyboard-key() {
+        if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SHIFT" {
+            root.keyboard-shift = !root.keyboard-shift;
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "BACK" {
+            root.keyboard-backspace();
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SPACE" {
+            root.keyboard-char(" ");
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "DONE" {
+            root.close-keyboard();
+        } else if root.keyboard-shift {
+            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col].to-uppercase());
+        } else {
+            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col]);
+        }
+    }
+
     // Maps home-header-index to whichever header button it represents; must
     // stay in sync with move-home-header() and HomeScreen's header layout.
+    // Index 0 opens/closes the search box and the virtual keyboard together,
+    // same as Y from a closed state; RT then toggles just the keyboard
+    // without touching the search box once it's open.
     function activate-home-header() {
         if root.home-header-index == 0 {
-            root.toggle-search();
+            if root.show-search {
+                root.toggle-search();
+                root.close-keyboard();
+            } else {
+                root.toggle-search();
+                root.open-keyboard("search", -1, root.search-query);
+            }
         } else if root.home-header-index == 1 {
             root.refresh-trainers();
         } else if root.home-header-index == 2 {
@@ -349,18 +489,20 @@ export component AppWindow inherits Window {
     // Maps form-focused-index (and, for the cheat rows and the final
     // Cancel/Save row, form-sub-index) to whichever control it represents;
     // must stay in sync with form-item-count()/form-sub-count() and
-    // AddEditTrainerModal's layout. The Name field (index 0) has no gamepad
-    // action - text entry there is still touch/keyboard-driven - so A is a
-    // no-op while it's focused.
+    // AddEditTrainerModal's layout.
     function activate-form-focused() {
-        if root.form-focused-index == 1 {
+        if root.form-focused-index == 0 {
+            root.open-keyboard("name", -1, root.form-name);
+        } else if root.form-focused-index == 1 {
             root.browse-exe();
         } else if root.form-focused-index == 2 {
             root.start-shortcut-recording();
         } else if root.form-focused-index == 3 {
             root.add-cheat-row();
         } else if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
-            if root.form-sub-index == 1 {
+            if root.form-sub-index == 0 {
+                root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 4].id, root.form-cheats[root.form-focused-index - 4].label);
+            } else if root.form-sub-index == 1 {
                 root.start-cheat-recording(root.form-cheats[root.form-focused-index - 4].id);
             } else if root.form-sub-index == 2 {
                 root.remove-cheat-row(root.form-cheats[root.form-focused-index - 4].id);
@@ -392,11 +534,14 @@ export component AppWindow inherits Window {
         root.recorded-combo = "";
     }
 
-    // Dispatches gamepad A/B to whichever popup is currently on top -
-    // key recorder, then add/edit form, then delete confirm - falling back to
-    // the home screen's header/list when nothing is open.
+    // Dispatches gamepad A/B to whichever popup is currently on top - the
+    // virtual keyboard (which can itself be layered over the add/edit form),
+    // then the key recorder, then add/edit form, then delete confirm -
+    // falling back to the home screen's header/list when nothing is open.
     public function gamepad-accept() {
-        if root.recording {
+        if root.show-keyboard {
+            root.activate-keyboard-key();
+        } else if root.recording {
             root.confirm-recording();
         } else if root.show-add-edit {
             root.activate-form-focused();
@@ -411,10 +556,13 @@ export component AppWindow inherits Window {
         }
     }
 
-    // B: closes whichever popup is on top, backs out of Settings, or - with
-    // nothing left to back out of - closes the app from Home.
+    // B: closes whichever popup is on top, clears and closes an open search
+    // box, backs out of Settings, or - with nothing left to back out of -
+    // closes the app from Home.
     public function gamepad-cancel() {
-        if root.recording {
+        if root.show-keyboard {
+            root.close-keyboard();
+        } else if root.recording {
             root.cancel-recording();
         } else if root.show-add-edit {
             root.cancel-form();
@@ -422,6 +570,8 @@ export component AppWindow inherits Window {
             root.delete-confirm-id = -1;
         } else if root.view == AppView.settings {
             root.go-home();
+        } else if root.show-search {
+            root.toggle-search();
         } else {
             root.quit-app();
         }
@@ -441,6 +591,8 @@ export component AppWindow inherits Window {
     callback remove-cheat-row(int);
     callback set-cheat-label(int, string);
     callback set-cheat-key(int, string);
+    callback keyboard-char(string);
+    callback keyboard-backspace();
 
     Timer {
         interval: 1800ms;
@@ -518,6 +670,20 @@ export component AppWindow inherits Window {
         recorded-combo <=> root.recorded-combo;
         cancel => { root.cancel-recording(); }
         confirm => { root.confirm-recording(); }
+    }
+
+    if root.show-keyboard: VirtualKeyboardModal {
+        preview: root.keyboard-preview;
+        shift: root.keyboard-shift;
+        focused-row: root.keyboard-row;
+        focused-col: root.keyboard-col;
+
+        close => { root.close-keyboard(); }
+        key-tapped(r, c) => {
+            root.keyboard-row = r;
+            root.keyboard-col = c;
+            root.activate-keyboard-key();
+        }
     }
 
     Toast {

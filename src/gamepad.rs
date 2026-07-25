@@ -9,9 +9,13 @@
 // focused field/button (add/edit form). D-Pad left/right cycles the value of
 // the focused settings control (accent color, background, row style) in
 // place, or moves between the fields/buttons within the add/edit form's
-// focused row. X (West) edits, Y (North) toggles search,
+// focused row. X (West) edits, Y (North) opens/starts typing into search,
 // Select deletes (with confirm), RB (RightTrigger) copies the launch script,
 // and Start opens settings — mirroring the home screen's gamepad hint bar.
+// While the virtual keyboard is open, X/Y are repurposed to backspace/space,
+// LT (LeftTrigger2) held is a momentary shift, and RT (RightTrigger2) closes
+// the keyboard — see AppWindow's show-keyboard-gated functions for why the
+// same buttons do double duty instead of needing dedicated ones.
 
 use std::time::Duration;
 
@@ -66,7 +70,7 @@ pub fn spawn_listener(app_weak: slint::Weak<AppWindow>) {
                     }
                     EventType::ButtonPressed(Button::North, _) => {
                         let _ = app_weak.upgrade_in_event_loop(|app| {
-                            app.invoke_toggle_search();
+                            app.invoke_open_search_keyboard();
                         });
                     }
                     EventType::ButtonPressed(Button::Select, _) => {
@@ -82,6 +86,21 @@ pub fn spawn_listener(app_weak: slint::Weak<AppWindow>) {
                     EventType::ButtonPressed(Button::Start, _) => {
                         let _ = app_weak.upgrade_in_event_loop(|app| {
                             app.invoke_open_settings_view();
+                        });
+                    }
+                    EventType::ButtonPressed(Button::LeftTrigger2, _) => {
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.invoke_keyboard_shift_hold(true);
+                        });
+                    }
+                    EventType::ButtonReleased(Button::LeftTrigger2, _) => {
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.invoke_keyboard_shift_hold(false);
+                        });
+                    }
+                    EventType::ButtonPressed(Button::RightTrigger2, _) => {
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.invoke_keyboard_right_trigger();
                         });
                     }
                     _ => {}

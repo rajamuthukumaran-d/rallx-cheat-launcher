@@ -180,6 +180,39 @@ fn find_trainer(state: &AppState, id: i32) -> Option<TrainerItem> {
     state.trainers.borrow().iter().find(|t| t.id == id).cloned()
 }
 
+/// Applies a virtual-keyboard edit (insert/backspace) to whichever field
+/// `keyboard_target` names ("search" | "name" | "cheat"), then mirrors the
+/// result back into `keyboard_preview` so the popup's own display stays in
+/// sync. The actual string mutation happens here in Rust rather than in
+/// Slint, since Slint's imperative string API has no substring/pop support.
+fn apply_keyboard_edit(app: &AppWindow, state: &AppState, edit: impl FnOnce(&mut String)) {
+    let mut text = app.get_keyboard_preview().to_string();
+    edit(&mut text);
+    app.set_keyboard_preview(text.clone().into());
+
+    match app.get_keyboard_target().as_str() {
+        "search" => {
+            app.set_search_query(text.into());
+            refresh_trainer_list(app, state);
+        }
+        "name" => app.set_form_name(text.into()),
+        "cheat" => {
+            let id = app.get_keyboard_cheat_id();
+            let cheats: Vec<CheatEntry> = cheats_to_vec(&app.get_form_cheats())
+                .into_iter()
+                .map(|mut c| {
+                    if c.id == id {
+                        c.label = text.clone().into();
+                    }
+                    c
+                })
+                .collect();
+            app.set_form_cheats(ModelRc::new(VecModel::from(cheats)));
+        }
+        _ => {}
+    }
+}
+
 fn show_toast(app: &AppWindow, message: impl Into<SharedString>) {
     app.set_toast_message(message.into());
     app.set_show_toast(true);
@@ -502,6 +535,26 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 app.set_form_exe_display("NewGame.exe".into());
             }
             show_toast(&app, "Executable picker would open here");
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_keyboard_char(move |ch| {
+            let app = app_weak.unwrap();
+            apply_keyboard_edit(&app, &state, |s| s.push_str(ch.as_str()));
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_keyboard_backspace(move || {
+            let app = app_weak.unwrap();
+            apply_keyboard_edit(&app, &state, |s| {
+                s.pop();
+            });
         });
     }
 }
