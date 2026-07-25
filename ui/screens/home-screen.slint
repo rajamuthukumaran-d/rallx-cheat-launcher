@@ -10,6 +10,11 @@ export component HomeScreen inherits Rectangle {
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in-out property <int> focused-index: -1;
+    // Gamepad/keyboard focus on the header row (Search, Refresh, Edit, Add,
+    // Settings) instead of the trainer list. header-index 0..4 selects which
+    // button; driven by AppWindow's move-selection/move-horizontal.
+    in property <bool> header-focused: false;
+    in property <int> header-index: 0;
 
     in property <[TrainerItem]> visible-trainers;
     in property <int> trainer-count;
@@ -21,12 +26,20 @@ export component HomeScreen inherits Rectangle {
     callback launch-trainer(int);
     callback launch-focused();
     callback move-selection(int);
+    callback move-horizontal(int);
     callback edit-trainer(int);
     callback delete-trainer(int);
     callback copy-trainer(int);
     callback search-changed(string);
 
     background: Theme.bg;
+
+    // Header button focus indicator: bumps icon size (and, where the icon
+    // isn't already accent-tinted, its color) instead of a border ring -
+    // matching the label/text highlighting used elsewhere in the app.
+    function header-hl(idx: int) -> bool {
+        return root.header-focused && root.header-index == idx;
+    }
 
     nav-scope := FocusScope {
         x: 0;
@@ -40,6 +53,12 @@ export component HomeScreen inherits Rectangle {
                 accept
             } else if (event.text == Key.UpArrow) {
                 root.move-selection(-1);
+                accept
+            } else if (event.text == Key.LeftArrow) {
+                root.move-horizontal(-1);
+                accept
+            } else if (event.text == Key.RightArrow) {
+                root.move-horizontal(1);
                 accept
             } else if (event.text == Key.Return) {
                 root.launch-focused();
@@ -129,11 +148,11 @@ export component HomeScreen inherits Rectangle {
 
                             IconButton {
                                 icon: @image-url("../../assets/images/icons/close.svg");
-                                icon-size: 14px;
+                                icon-size: root.header-hl(0) ? 17px : 14px;
                                 button-size: 28px;
                                 bordered: false;
                                 button-bg: transparent;
-                                icon-color: Theme.text-dim;
+                                icon-color: root.header-hl(0) ? Theme.accent : Theme.text-dim;
                                 tooltip-text: "Close search";
                                 clicked => {
                                     root.show-search = false;
@@ -146,36 +165,36 @@ export component HomeScreen inherits Rectangle {
 
                     if !root.show-search: IconButton {
                         icon: @image-url("../../assets/images/icons/search.svg");
-                        icon-size: 17px;
+                        icon-size: root.header-hl(0) ? 20px : 17px;
                         button-size: 40px;
-                        icon-color: Theme.text-dim;
+                        icon-color: root.header-hl(0) ? Theme.accent : Theme.text-dim;
                         tooltip-text: "Search trainers";
                         clicked => { root.show-search = true; }
                     }
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/refresh.svg");
-                        icon-size: 17px;
+                        icon-size: root.header-hl(1) ? 20px : 17px;
                         button-size: 40px;
-                        icon-color: Theme.text-dim;
+                        icon-color: root.header-hl(1) ? Theme.accent : Theme.text-dim;
                         tooltip-text: "Refresh trainer list";
                         clicked => { root.refresh(); }
                     }
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/edit.svg");
-                        icon-size: 17px;
+                        icon-size: root.header-hl(2) ? 20px : 17px;
                         button-size: 40px;
                         bordered: !root.edit-mode;
                         button-bg: root.edit-mode ? Theme.accent : Theme.panel2;
-                        icon-color: root.edit-mode ? Theme.on-accent : Theme.text-dim;
+                        icon-color: root.edit-mode ? Theme.on-accent : (root.header-hl(2) ? Theme.accent : Theme.text-dim);
                         tooltip-text: root.edit-mode ? "Done editing" : "Edit trainers";
                         clicked => { root.edit-mode = !root.edit-mode; }
                     }
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/add.svg");
-                        icon-size: 20px;
+                        icon-size: root.header-hl(3) ? 23px : 20px;
                         button-size: 40px;
                         bordered: false;
                         button-bg: Theme.accent;
@@ -186,9 +205,9 @@ export component HomeScreen inherits Rectangle {
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/settings.svg");
-                        icon-size: 19px;
+                        icon-size: root.header-hl(4) ? 22px : 19px;
                         button-size: 40px;
-                        icon-color: Theme.text;
+                        icon-color: root.header-hl(4) ? Theme.accent : Theme.text;
                         tooltip-text: "Settings";
                         clicked => { root.open-settings(); }
                     }
@@ -284,7 +303,7 @@ export component HomeScreen inherits Rectangle {
                         for t[i] in root.visible-trainers: TrainerRow {
                             trainer: t;
                             edit-mode: root.edit-mode;
-                            selected: i == root.focused-index;
+                            selected: !root.header-focused && i == root.focused-index;
                             launch => { root.launch-trainer(t.id); }
                             edit => { root.edit-trainer(t.id); }
                             delete => { root.delete-trainer(t.id); }

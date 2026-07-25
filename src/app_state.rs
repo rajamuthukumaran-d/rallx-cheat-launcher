@@ -194,6 +194,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
+    app.set_form_focused_index(-1);
+    app.set_form_sub_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -206,6 +208,8 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
+    app.set_form_focused_index(-1);
+    app.set_form_sub_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -398,6 +402,8 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             }
 
             app.set_show_add_edit(false);
+            app.set_form_focused_index(-1);
+            app.set_form_sub_index(0);
             refresh_trainer_list(&app, &state);
         });
     }

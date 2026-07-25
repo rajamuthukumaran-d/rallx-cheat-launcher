@@ -1,4 +1,4 @@
-import { Theme } from "theme.slint";
+import { Theme, Palette } from "theme.slint";
 import { TrainerItem, CheatEntry } from "types.slint";
 import { HomeScreen } from "screens/home-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
@@ -25,7 +25,14 @@ export component AppWindow inherits Window {
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in-out property <bool> close-after-launch: true;
-    in-out property <int> focused-index: -1;
+    // Defaults to the first row so the trainer list is already highlighted
+    // when the app opens, before any gamepad/keyboard input.
+    in-out property <int> focused-index: 0;
+    // True when focus has moved off the trainer list up into the home
+    // screen's header row (Search/Refresh/Edit/Add/Settings).
+    in-out property <bool> home-header-focused: false;
+    in-out property <int> home-header-index: 0;
+    in-out property <int> settings-focused-index: -1;
 
     in-out property <[TrainerItem]> visible-trainers: [];
     in-out property <int> trainer-count: 0;
@@ -46,6 +53,15 @@ export component AppWindow inherits Window {
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
     in-out property <[CheatEntry]> form-cheats: [];
+    // Gamepad focus target spanning the whole add/edit form: 0 Name,
+    // 1 Game executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
+    // then Cancel/Save last. Keep in sync with form-item-count()/
+    // activate-form-focused() below and AddEditTrainerModal's layout.
+    in-out property <int> form-focused-index: -1;
+    // Left/right position within the current form-focused-index row, for
+    // rows with more than one field/button (a cheat row's label/record/
+    // remove, or the final Cancel/Save row). Reset to 0 on every row change.
+    in-out property <int> form-sub-index: 0;
 
     in-out property <bool> recording: false;
     in-out property <string> recording-target: "";
@@ -64,11 +80,161 @@ export component AppWindow inherits Window {
         }
     }
 
+    // True while any popup (key recorder, add/edit form, delete confirm) is
+    // on top of the screen - gamepad actions that act on background state
+    // (list navigation, edit/delete/copy, search, settings) must no-op so a
+    // popup press can't leak through to whatever is behind it.
+    function popup-open() -> bool {
+        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0;
+    }
+
+    // Keep in sync with SettingsScreen's control layout: trainer folder,
+    // default shortcut, close-after-launch, accent color, background, row
+    // style - each a single up/down stop; accent/background/row-style are
+    // then cycled in place with left/right (see move-settings-value).
+    function settings-item-count() -> int {
+        return 6;
+    }
+
+    // Slint's imperative `for` has no index binding (only the declarative
+    // repeater does), so the current accent's position is found by direct
+    // comparison rather than a loop.
+    function accent-index() -> int {
+        if Theme.accent == Palette.accents[0] {
+            return 0;
+        } else if Theme.accent == Palette.accents[1] {
+            return 1;
+        } else if Theme.accent == Palette.accents[2] {
+            return 2;
+        } else if Theme.accent == Palette.accents[3] {
+            return 3;
+        } else if Theme.accent == Palette.accents[4] {
+            return 4;
+        }
+        return 0;
+    }
+
+    function cycle-accent(delta: int) {
+        Theme.accent = Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)];
+    }
+
+    function move-settings-value(delta: int) {
+        if root.settings-focused-index == 3 {
+            root.cycle-accent(delta);
+        } else if root.settings-focused-index == 4 {
+            Theme.dark = !Theme.dark;
+        } else if root.settings-focused-index == 5 {
+            Theme.compact = !Theme.compact;
+        }
+    }
+
+    function move-settings-selection(delta: int) {
+        if root.settings-focused-index < 0 {
+            root.settings-focused-index = 0;
+        } else {
+            root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
+        }
+    }
+
+    // Name, Game executable, Shortcut, Add cheat, one stop per cheat row,
+    // Cancel/Save.
+    function form-item-count() -> int {
+        return 5 + root.form-cheats.length;
+    }
+
+    function move-form-selection(delta: int) {
+        if root.form-focused-index < 0 {
+            root.form-focused-index = 0;
+        } else {
+            root.form-focused-index = max(0, min(root.form-focused-index + delta, root.form-item-count() - 1));
+        }
+        root.form-sub-index = 0;
+    }
+
+    // How many fields/buttons share the current form-focused-index row: 3 for
+    // a cheat row (label, record key, remove), 2 for the final Cancel/Save
+    // row, 1 everywhere else.
+    function form-sub-count() -> int {
+        if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
+            return 3;
+        } else if root.form-focused-index == 4 + root.form-cheats.length {
+            return 2;
+        }
+        return 1;
+    }
+
+    function move-form-sub-selection(delta: int) {
+        if root.form-focused-index < 0 {
+            return;
+        }
+        root.form-sub-index = max(0, min(root.form-sub-index + delta, root.form-sub-count() - 1));
+    }
+
+    // Home screen header has 5 stops: Search, Refresh, Edit, Add, Settings.
+    // Keep in sync with activate-home-header() and HomeScreen's layout.
+    function move-home-header(delta: int) {
+        root.home-header-index = max(0, min(root.home-header-index + delta, 4));
+    }
+
+    // Left/right: cycles the focused settings row's value, moves between
+    // fields/buttons within the add/edit form's focused row, or moves
+    // between header buttons on the home screen.
+    public function move-horizontal(delta: int) {
+        if root.recording || root.delete-confirm-id >= 0 {
+            return;
+        }
+        if root.show-add-edit {
+            root.move-form-sub-selection(delta);
+        } else if root.view == AppView.settings {
+            root.move-settings-value(delta);
+        } else if root.home-header-focused {
+            root.move-home-header(delta);
+        }
+    }
+
     public function move-selection(delta: int) {
+        // The key recorder and delete confirm have nothing to navigate, so
+        // they still block navigation entirely; the add/edit form is itself
+        // navigable, so it's handled instead of blocked.
+        if root.recording || root.delete-confirm-id >= 0 {
+            return;
+        }
+        if root.show-add-edit {
+            root.move-form-selection(delta);
+            return;
+        }
+        if root.view == AppView.settings {
+            root.move-settings-selection(delta);
+            return;
+        }
+        // Home screen: header <-> trainer list. Up from the first row (or
+        // from an empty list) moves into the header; Down from the header
+        // returns to wherever the list was left focused, while Up from the
+        // header wraps to the last row.
+        if root.home-header-focused {
+            if delta > 0 {
+                root.home-header-focused = false;
+                if root.focused-index < 0 {
+                    root.focused-index = 0;
+                }
+            } else if delta < 0 && root.visible-trainers.length > 0 {
+                root.home-header-focused = false;
+                root.focused-index = root.visible-trainers.length - 1;
+            }
+            return;
+        }
+        if delta < 0 && (root.visible-trainers.length == 0 || root.focused-index <= 0) {
+            root.home-header-focused = true;
+            return;
+        }
         if root.visible-trainers.length == 0 {
             return;
         }
         if root.focused-index < 0 {
+            root.focused-index = 0;
+        } else if delta > 0 && root.focused-index >= root.visible-trainers.length - 1 {
+            // Down from the last row loops back to the top of the list
+            // (Up from the first row already goes to the header instead).
             root.focused-index = 0;
         } else {
             root.focused-index = max(0, min(root.focused-index + delta, root.visible-trainers.length - 1));
@@ -76,24 +242,36 @@ export component AppWindow inherits Window {
     }
 
     public function edit-focused-trainer() {
+        if root.popup-open() {
+            return;
+        }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
             root.open-edit(root.visible-trainers[root.focused-index].id);
         }
     }
 
     public function delete-focused-trainer() {
+        if root.popup-open() {
+            return;
+        }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
             root.request-delete(root.visible-trainers[root.focused-index].id);
         }
     }
 
     public function copy-focused-trainer() {
+        if root.popup-open() {
+            return;
+        }
         if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
             root.copy-script(root.visible-trainers[root.focused-index].id);
         }
     }
 
     public function toggle-search() {
+        if root.popup-open() {
+            return;
+        }
         root.show-search = !root.show-search;
         if !root.show-search {
             root.search-query = "";
@@ -102,7 +280,98 @@ export component AppWindow inherits Window {
     }
 
     public function open-settings-view() {
+        if root.popup-open() {
+            return;
+        }
+        root.settings-focused-index = -1;
         root.view = AppView.settings;
+    }
+
+    // Maps home-header-index to whichever header button it represents; must
+    // stay in sync with move-home-header() and HomeScreen's header layout.
+    function activate-home-header() {
+        if root.home-header-index == 0 {
+            root.toggle-search();
+        } else if root.home-header-index == 1 {
+            root.refresh-trainers();
+        } else if root.home-header-index == 2 {
+            root.edit-mode = !root.edit-mode;
+        } else if root.home-header-index == 3 {
+            root.open-add();
+        } else if root.home-header-index == 4 {
+            root.open-settings-view();
+        }
+    }
+
+    function go-home() {
+        root.settings-focused-index = -1;
+        root.view = AppView.home;
+    }
+
+    function start-default-shortcut-recording() {
+        root.recording-target = "default";
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    function start-shortcut-recording() {
+        root.recording-target = "shortcut";
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    function start-cheat-recording(id: int) {
+        root.recording-target = "cheat";
+        root.recording-cheat-id = id;
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    // Maps settings-focused-index to whichever control it represents. Rows 3-5
+    // (accent/background/row-style) are cycled with left/right instead - see
+    // move-settings-value - so A is a no-op there.
+    function activate-settings-focused() {
+        if root.settings-focused-index == 0 {
+            root.browse-folder();
+        } else if root.settings-focused-index == 1 {
+            root.start-default-shortcut-recording();
+        } else if root.settings-focused-index == 2 {
+            root.close-after-launch = !root.close-after-launch;
+        }
+    }
+
+    function cancel-form() {
+        root.show-add-edit = false;
+        root.form-focused-index = -1;
+        root.form-sub-index = 0;
+    }
+
+    // Maps form-focused-index (and, for the cheat rows and the final
+    // Cancel/Save row, form-sub-index) to whichever control it represents;
+    // must stay in sync with form-item-count()/form-sub-count() and
+    // AddEditTrainerModal's layout. The Name field (index 0) has no gamepad
+    // action - text entry there is still touch/keyboard-driven - so A is a
+    // no-op while it's focused.
+    function activate-form-focused() {
+        if root.form-focused-index == 1 {
+            root.browse-exe();
+        } else if root.form-focused-index == 2 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 3 {
+            root.add-cheat-row();
+        } else if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
+            if root.form-sub-index == 1 {
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 4].id);
+            } else if root.form-sub-index == 2 {
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 4].id);
+            }
+        } else if root.form-focused-index == 4 + root.form-cheats.length {
+            if root.form-sub-index == 0 {
+                root.cancel-form();
+            } else {
+                root.save-form();
+            }
+        }
     }
 
     function confirm-recording() {
@@ -125,14 +394,18 @@ export component AppWindow inherits Window {
 
     // Dispatches gamepad A/B to whichever popup is currently on top -
     // key recorder, then add/edit form, then delete confirm - falling back to
-    // the home screen's own launch/no-op when nothing is open.
+    // the home screen's header/list when nothing is open.
     public function gamepad-accept() {
         if root.recording {
             root.confirm-recording();
         } else if root.show-add-edit {
-            root.save-form();
+            root.activate-form-focused();
         } else if root.delete-confirm-id >= 0 {
             root.confirm-delete(root.delete-confirm-id);
+        } else if root.view == AppView.settings {
+            root.activate-settings-focused();
+        } else if root.home-header-focused {
+            root.activate-home-header();
         } else {
             root.launch-focused-trainer();
         }
@@ -142,9 +415,11 @@ export component AppWindow inherits Window {
         if root.recording {
             root.cancel-recording();
         } else if root.show-add-edit {
-            root.show-add-edit = false;
+            root.cancel-form();
         } else if root.delete-confirm-id >= 0 {
             root.delete-confirm-id = -1;
+        } else if root.view == AppView.settings {
+            root.go-home();
         }
     }
 
@@ -175,16 +450,19 @@ export component AppWindow inherits Window {
         show-search <=> root.show-search;
         search-query <=> root.search-query;
         focused-index <=> root.focused-index;
+        header-focused: root.home-header-focused;
+        header-index: root.home-header-index;
         visible-trainers: root.visible-trainers;
         trainer-count: root.trainer-count;
         total-size-label: root.total-size-label;
 
         open-add => { root.open-add(); }
-        open-settings => { root.view = AppView.settings; }
+        open-settings => { root.open-settings-view(); }
         refresh => { root.refresh-trainers(); }
         launch-trainer(id) => { root.launch-trainer(id); }
-        launch-focused => { root.launch-focused-trainer(); }
+        launch-focused => { root.gamepad-accept(); }
         move-selection(delta) => { root.move-selection(delta); }
+        move-horizontal(delta) => { root.move-horizontal(delta); }
         edit-trainer(id) => { root.open-edit(id); }
         delete-trainer(id) => { root.request-delete(id); }
         copy-trainer(id) => { root.copy-script(id); }
@@ -197,14 +475,11 @@ export component AppWindow inherits Window {
         folder-path: root.folder-path;
         default-shortcut-label: root.default-shortcut-label;
         close-after-launch <=> root.close-after-launch;
+        focused-index: root.settings-focused-index;
 
-        back => { root.view = AppView.home; }
+        back => { root.go-home(); }
         browse-folder => { root.browse-folder(); }
-        record-default-shortcut => {
-            root.recording-target = "default";
-            root.recorded-combo = "";
-            root.recording = true;
-        }
+        record-default-shortcut => { root.start-default-shortcut-recording(); }
     }
 
     if root.delete-confirm-id >= 0: DeleteConfirmModal {
@@ -220,24 +495,17 @@ export component AppWindow inherits Window {
         form-exe-display: root.form-exe-display;
         form-shortcut-display: root.form-shortcut-display;
         cheats: root.form-cheats;
+        focused-index: root.form-focused-index;
+        sub-index: root.form-sub-index;
 
         name-changed(v) => { root.form-name = v; }
         browse-exe => { root.browse-exe(); }
-        record-shortcut => {
-            root.recording-target = "shortcut";
-            root.recorded-combo = "";
-            root.recording = true;
-        }
+        record-shortcut => { root.start-shortcut-recording(); }
         add-cheat => { root.add-cheat-row(); }
         remove-cheat(id) => { root.remove-cheat-row(id); }
         cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
-        record-cheat(id) => {
-            root.recording-target = "cheat";
-            root.recording-cheat-id = id;
-            root.recorded-combo = "";
-            root.recording = true;
-        }
-        cancel => { root.show-add-edit = false; }
+        record-cheat(id) => { root.start-cheat-recording(id); }
+        cancel => { root.cancel-form(); }
         save => { root.save-form(); }
     }
 

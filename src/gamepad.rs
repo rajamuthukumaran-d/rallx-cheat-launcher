@@ -4,10 +4,14 @@
 // thread via Weak::upgrade_in_event_loop, since gilrs has no async/event-loop
 // integration of its own. A (Button::South) launches the focused trainer row,
 // or accepts/confirms whichever popup is currently on top; B (Button::East)
-// cancels/closes that popup. D-Pad up/down moves the focused row, mirroring
-// the keyboard's arrow keys. X (West) edits, Y (North) toggles search, Select
-// deletes (with confirm), RB (RightTrigger) copies the launch script, and
-// Start opens settings — mirroring the home screen's gamepad hint bar.
+// cancels/closes that popup, or backs out of Settings back to Home. D-Pad
+// up/down moves the focused row (home), focused control (settings), or
+// focused field/button (add/edit form). D-Pad left/right cycles the value of
+// the focused settings control (accent color, background, row style) in
+// place, or moves between the fields/buttons within the add/edit form's
+// focused row. X (West) edits, Y (North) toggles search,
+// Select deletes (with confirm), RB (RightTrigger) copies the launch script,
+// and Start opens settings — mirroring the home screen's gamepad hint bar.
 
 use std::time::Duration;
 
@@ -43,6 +47,16 @@ pub fn spawn_listener(app_weak: slint::Weak<AppWindow>) {
                     EventType::ButtonPressed(Button::DPadUp, _) => {
                         let _ = app_weak.upgrade_in_event_loop(|app| {
                             app.invoke_move_selection(-1);
+                        });
+                    }
+                    EventType::ButtonPressed(Button::DPadRight, _) => {
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.invoke_move_horizontal(1);
+                        });
+                    }
+                    EventType::ButtonPressed(Button::DPadLeft, _) => {
+                        let _ = app_weak.upgrade_in_event_loop(|app| {
+                            app.invoke_move_horizontal(-1);
                         });
                     }
                     EventType::ButtonPressed(Button::West, _) => {
