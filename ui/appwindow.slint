@@ -75,6 +75,36 @@ export component AppWindow inherits Window {
         }
     }
 
+    public function edit-focused-trainer() {
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.open-edit(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function delete-focused-trainer() {
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.request-delete(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function copy-focused-trainer() {
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.copy-script(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function toggle-search() {
+        root.show-search = !root.show-search;
+        if !root.show-search {
+            root.search-query = "";
+            root.search-changed("");
+        }
+    }
+
+    public function open-settings-view() {
+        root.view = AppView.settings;
+    }
+
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
