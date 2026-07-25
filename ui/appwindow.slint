@@ -704,104 +704,150 @@ export component AppWindow inherits Window {
         triggered => { root.show-toast = false; }
     }
 
-    if root.view == AppView.home: HomeScreen {
+    // Global keyboard navigation, mirroring the gamepad one-for-one. This
+    // FocusScope wraps the whole UI and holds focus for the app, translating
+    // keys into the exact same functions gamepad.rs invokes: arrows ->
+    // move-selection/move-horizontal, Enter = A (gamepad-accept), Esc = B
+    // (gamepad-cancel). Wrapping (rather than sitting beside) the content
+    // matters: text inputs and the key recorder steal focus while active, but
+    // being their ancestor, this scope still receives the keys they don't
+    // consume (arrows, Enter, Esc) so navigation keeps working even while
+    // typing. via-gamepad is false so a physical Enter never opens the
+    // on-screen keyboard. The `changed` hooks below hand focus back to this
+    // scope when a focus-stealing input closes.
+    key-scope := FocusScope {
         width: 100%;
         height: 100%;
-        edit-mode <=> root.edit-mode;
-        show-search <=> root.show-search;
-        search-query <=> root.search-query;
-        focused-index <=> root.focused-index;
-        header-focused: root.home-header-focused;
-        header-index: root.home-header-index;
-        empty-action-focused: root.empty-action-focused;
-        visible-trainers: root.visible-trainers;
-        trainer-count: root.trainer-count;
-        total-size-label: root.total-size-label;
+        init => { self.focus(); }
 
-        open-add => { root.open-add(); }
-        open-settings => { root.open-settings-view(); }
-        refresh => { root.refresh-trainers(); }
-        launch-trainer(id) => { root.launch-trainer(id); }
-        launch-focused => { root.gamepad-accept(false); }
-        move-selection(delta) => { root.move-selection(delta); }
-        move-horizontal(delta) => { root.move-horizontal(delta); }
-        edit-trainer(id) => { root.open-edit(id); }
-        delete-trainer(id) => { root.request-delete(id); }
-        copy-trainer(id) => { root.copy-script(id); }
-        search-changed(q) => { root.search-changed(q); }
-    }
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                root.move-selection(1);
+                accept
+            } else if (event.text == Key.UpArrow) {
+                root.move-selection(-1);
+                accept
+            } else if (event.text == Key.LeftArrow) {
+                root.move-horizontal(-1);
+                accept
+            } else if (event.text == Key.RightArrow) {
+                root.move-horizontal(1);
+                accept
+            } else if (event.text == Key.Return) {
+                root.gamepad-accept(false);
+                accept
+            } else if (event.text == Key.Escape) {
+                root.gamepad-cancel();
+                accept
+            } else {
+                reject
+            }
+        }
 
-    if root.view == AppView.settings: SettingsScreen {
-        width: 100%;
-        height: 100%;
-        folder-path: root.folder-path;
-        default-shortcut-label: root.default-shortcut-label;
-        close-after-launch <=> root.close-after-launch;
-        confirm-exit <=> root.confirm-exit;
-        focused-index: root.settings-focused-index;
+        if root.view == AppView.home: HomeScreen {
+            width: 100%;
+            height: 100%;
+            edit-mode <=> root.edit-mode;
+            show-search <=> root.show-search;
+            search-query <=> root.search-query;
+            focused-index <=> root.focused-index;
+            header-focused: root.home-header-focused;
+            header-index: root.home-header-index;
+            empty-action-focused: root.empty-action-focused;
+            visible-trainers: root.visible-trainers;
+            trainer-count: root.trainer-count;
+            total-size-label: root.total-size-label;
 
-        back => { root.go-home(); }
-        browse-folder => { root.browse-folder(); }
-        record-default-shortcut => { root.start-default-shortcut-recording(); }
-    }
+            open-add => { root.open-add(); }
+            open-settings => { root.open-settings-view(); }
+            refresh => { root.refresh-trainers(); }
+            launch-trainer(id) => { root.launch-trainer(id); }
+            edit-trainer(id) => { root.open-edit(id); }
+            delete-trainer(id) => { root.request-delete(id); }
+            copy-trainer(id) => { root.copy-script(id); }
+            search-changed(q) => { root.search-changed(q); }
+        }
 
-    if root.delete-confirm-id >= 0: DeleteConfirmModal {
-        trainer-name: root.delete-confirm-name;
-        confirm-focused: root.confirm-popup-index == 1;
-        cancel => { root.close-delete-confirm(false); }
-        confirm => { root.close-delete-confirm(true); }
-    }
+        if root.view == AppView.settings: SettingsScreen {
+            width: 100%;
+            height: 100%;
+            folder-path: root.folder-path;
+            default-shortcut-label: root.default-shortcut-label;
+            close-after-launch <=> root.close-after-launch;
+            confirm-exit <=> root.confirm-exit;
+            focused-index: root.settings-focused-index;
 
-    if root.show-quit-confirm: QuitConfirmModal {
-        confirm-focused: root.confirm-popup-index == 1;
-        cancel => { root.close-quit-confirm(false); }
-        confirm => { root.close-quit-confirm(true); }
-    }
+            back => { root.go-home(); }
+            browse-folder => { root.browse-folder(); }
+            record-default-shortcut => { root.start-default-shortcut-recording(); }
+        }
 
-    if root.show-add-edit: AddEditTrainerModal {
-        title-text: root.form-title;
-        save-label: root.form-save-label;
-        form-name <=> root.form-name;
-        form-exe-display: root.form-exe-display;
-        form-shortcut-display: root.form-shortcut-display;
-        cheats: root.form-cheats;
-        focused-index: root.form-focused-index;
-        sub-index: root.form-sub-index;
+        if root.delete-confirm-id >= 0: DeleteConfirmModal {
+            trainer-name: root.delete-confirm-name;
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-delete-confirm(false); }
+            confirm => { root.close-delete-confirm(true); }
+        }
 
-        name-changed(v) => { root.form-name = v; }
-        browse-exe => { root.browse-exe(); }
-        record-shortcut => { root.start-shortcut-recording(); }
-        add-cheat => { root.add-cheat-row(); }
-        remove-cheat(id) => { root.remove-cheat-row(id); }
-        cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
-        record-cheat(id) => { root.start-cheat-recording(id); }
-        cancel => { root.cancel-form(); }
-        save => { root.save-form(); }
-    }
+        if root.show-quit-confirm: QuitConfirmModal {
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-quit-confirm(false); }
+            confirm => { root.close-quit-confirm(true); }
+        }
 
-    if root.recording: KeyRecorderModal {
-        recorded-combo <=> root.recorded-combo;
-        confirm-focused: root.confirm-popup-index == 1;
-        cancel => { root.cancel-recording(); }
-        confirm => { root.confirm-recording(); }
-    }
+        if root.show-add-edit: AddEditTrainerModal {
+            title-text: root.form-title;
+            save-label: root.form-save-label;
+            form-name <=> root.form-name;
+            form-exe-display: root.form-exe-display;
+            form-shortcut-display: root.form-shortcut-display;
+            cheats: root.form-cheats;
+            focused-index: root.form-focused-index;
+            sub-index: root.form-sub-index;
 
-    if root.show-keyboard: VirtualKeyboardModal {
-        preview: root.keyboard-preview;
-        shift: root.keyboard-shift;
-        focused-row: root.keyboard-row;
-        focused-col: root.keyboard-col;
+            name-changed(v) => { root.form-name = v; }
+            browse-exe => { root.browse-exe(); }
+            record-shortcut => { root.start-shortcut-recording(); }
+            add-cheat => { root.add-cheat-row(); }
+            remove-cheat(id) => { root.remove-cheat-row(id); }
+            cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
+            record-cheat(id) => { root.start-cheat-recording(id); }
+            cancel => { root.cancel-form(); }
+            save => { root.save-form(); }
+        }
 
-        close => { root.close-keyboard(); }
-        key-tapped(r, c) => {
-            root.keyboard-row = r;
-            root.keyboard-col = c;
-            root.activate-keyboard-key();
+        if root.recording: KeyRecorderModal {
+            recorded-combo <=> root.recorded-combo;
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.cancel-recording(); }
+            confirm => { root.confirm-recording(); }
+        }
+
+        if root.show-keyboard: VirtualKeyboardModal {
+            preview: root.keyboard-preview;
+            shift: root.keyboard-shift;
+            focused-row: root.keyboard-row;
+            focused-col: root.keyboard-col;
+
+            close => { root.close-keyboard(); }
+            key-tapped(r, c) => {
+                root.keyboard-row = r;
+                root.keyboard-col = c;
+                root.activate-keyboard-key();
+            }
+        }
+
+        Toast {
+            message: root.toast-message;
+            show: root.show-toast;
         }
     }
 
-    Toast {
-        message: root.toast-message;
-        show: root.show-toast;
-    }
+    // Return focus to key-scope whenever a focus-stealing input closes (the
+    // search box and add/edit text fields auto-focus themselves; the key
+    // recorder grabs focus to capture a combo), so keyboard nav resumes.
+    changed show-search => { if (!root.show-search) { key-scope.focus(); } }
+    changed recording => { if (!root.recording) { key-scope.focus(); } }
+    changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
+    changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
 }

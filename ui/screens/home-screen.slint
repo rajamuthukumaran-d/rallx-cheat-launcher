@@ -27,9 +27,6 @@ export component HomeScreen inherits Rectangle {
     callback open-settings();
     callback refresh();
     callback launch-trainer(int);
-    callback launch-focused();
-    callback move-selection(int);
-    callback move-horizontal(int);
     callback edit-trainer(int);
     callback delete-trainer(int);
     callback copy-trainer(int);
@@ -44,32 +41,12 @@ export component HomeScreen inherits Rectangle {
         return root.header-focused && root.header-index == idx;
     }
 
-    nav-scope := FocusScope {
+    // Keyboard navigation is handled globally by AppWindow's key-scope
+    // (mirroring the gamepad), so this is just a plain container now.
+    Rectangle {
         x: 0;
         width: 100%;
         height: 100%;
-        init => { self.focus(); }
-
-        key-pressed(event) => {
-            if (event.text == Key.DownArrow) {
-                root.move-selection(1);
-                accept
-            } else if (event.text == Key.UpArrow) {
-                root.move-selection(-1);
-                accept
-            } else if (event.text == Key.LeftArrow) {
-                root.move-horizontal(-1);
-                accept
-            } else if (event.text == Key.RightArrow) {
-                root.move-horizontal(1);
-                accept
-            } else if (event.text == Key.Return) {
-                root.launch-focused();
-                accept
-            } else {
-                reject
-            }
-        }
 
         VerticalLayout {
             // Header
