@@ -25,6 +25,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in-out property <bool> close-after-launch: true;
+    in-out property <int> focused-index: -1;
 
     in-out property <[TrainerItem]> visible-trainers: [];
     in-out property <int> trainer-count: 0;
@@ -56,6 +57,24 @@ export component AppWindow inherits Window {
 
     callback launch-trainer(int);
     callback refresh-trainers();
+
+    public function launch-focused-trainer() {
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.launch-trainer(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function move-selection(delta: int) {
+        if root.visible-trainers.length == 0 {
+            return;
+        }
+        if root.focused-index < 0 {
+            root.focused-index = 0;
+        } else {
+            root.focused-index = max(0, min(root.focused-index + delta, root.visible-trainers.length - 1));
+        }
+    }
+
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
@@ -82,6 +101,7 @@ export component AppWindow inherits Window {
         edit-mode <=> root.edit-mode;
         show-search <=> root.show-search;
         search-query <=> root.search-query;
+        focused-index <=> root.focused-index;
         visible-trainers: root.visible-trainers;
         trainer-count: root.trainer-count;
         total-size-label: root.total-size-label;
@@ -90,6 +110,8 @@ export component AppWindow inherits Window {
         open-settings => { root.view = AppView.settings; }
         refresh => { root.refresh-trainers(); }
         launch-trainer(id) => { root.launch-trainer(id); }
+        launch-focused => { root.launch-focused-trainer(); }
+        move-selection(delta) => { root.move-selection(delta); }
         edit-trainer(id) => { root.open-edit(id); }
         delete-trainer(id) => { root.request-delete(id); }
         copy-trainer(id) => { root.copy-script(id); }

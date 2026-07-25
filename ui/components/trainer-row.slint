@@ -11,6 +11,7 @@ export component TrainerRow inherits Rectangle {
     callback edit();
     callback delete();
     callback copy();
+    callback select();
 
     // ListView only permits a single `for` as its direct child, so row-to-row
     // spacing can't come from a wrapping layout's `spacing` - instead each row
@@ -27,6 +28,16 @@ export component TrainerRow inherits Rectangle {
         border-color: selected ? Theme.accent : Theme.border;
 
         animate background, border-color { duration: 100ms; }
+
+        row-touch := TouchArea {
+            x: 0;
+            width: 100%;
+            height: 100%;
+            clicked => {
+                root.select();
+                root.launch();
+            }
+        }
 
         HorizontalLayout {
             padding-left: Theme.row-padding-h;

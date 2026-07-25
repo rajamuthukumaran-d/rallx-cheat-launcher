@@ -250,13 +250,20 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         let state = state.clone();
         app.on_launch_trainer(move |id| {
             let app = app_weak.unwrap();
-            if let Some(trainer) = find_trainer(&state, id) {
-                let suffix = if app.get_close_after_launch() {
-                    " (app would close)"
-                } else {
-                    ""
-                };
-                show_toast(&app, format!("Launching {}…{}", trainer.name, suffix));
+            let Some(trainer) = find_trainer(&state, id) else {
+                return;
+            };
+            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                show_toast(&app, "No trainer folder selected");
+                return;
+            };
+
+            match trainer::launch_trainer(&folder, &trainer.exe) {
+                Ok(()) if app.get_close_after_launch() => {
+                    let _ = slint::quit_event_loop();
+                }
+                Ok(()) => show_toast(&app, format!("Launched {}", trainer.name)),
+                Err(err) => show_toast(&app, format!("Failed to launch {}: {err}", trainer.name)),
             }
         });
     }
