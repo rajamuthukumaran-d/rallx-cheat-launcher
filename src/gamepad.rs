@@ -15,7 +15,11 @@
 // While the virtual keyboard is open, X/Y are repurposed to backspace/space,
 // LT (LeftTrigger2) held is a momentary shift, and RT (RightTrigger2) closes
 // the keyboard — see AppWindow's show-keyboard-gated functions for why the
-// same buttons do double duty instead of needing dedicated ones.
+// same buttons do double duty instead of needing dedicated ones. A passes
+// via-gamepad=true so AppWindow knows this accept came from an actual
+// gamepad press and may open the virtual keyboard — the physical Return key
+// (home-screen.slint) reuses the same dispatcher with via-gamepad=false so
+// it doesn't.
 
 use std::time::Duration;
 
@@ -35,7 +39,7 @@ pub fn spawn_listener(app_weak: slint::Weak<AppWindow>) {
                 match event {
                     EventType::ButtonPressed(Button::South, _) => {
                         let _ = app_weak.upgrade_in_event_loop(|app| {
-                            app.invoke_gamepad_accept();
+                            app.invoke_gamepad_accept(true);
                         });
                     }
                     EventType::ButtonPressed(Button::East, _) => {

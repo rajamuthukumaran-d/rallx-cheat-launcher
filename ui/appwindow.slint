@@ -472,17 +472,20 @@ export component AppWindow inherits Window {
 
     // Maps home-header-index to whichever header button it represents; must
     // stay in sync with move-home-header() and HomeScreen's header layout.
-    // Index 0 opens/closes the search box and the virtual keyboard together,
-    // same as Y from a closed state; RT then toggles just the keyboard
-    // without touching the search box once it's open.
-    function activate-home-header() {
+    // Index 0 opens/closes the search box, and - only when triggered by an
+    // actual gamepad press, not the physical Return key - the virtual
+    // keyboard alongside it, same as Y from a closed state; RT then toggles
+    // just the keyboard without touching the search box once it's open.
+    function activate-home-header(via-gamepad: bool) {
         if root.home-header-index == 0 {
             if root.show-search {
                 root.toggle-search();
                 root.close-keyboard();
             } else {
                 root.toggle-search();
-                root.open-keyboard("search", -1, root.search-query);
+                if via-gamepad {
+                    root.open-keyboard("search", -1, root.search-query);
+                }
             }
         } else if root.home-header-index == 1 {
             root.refresh-trainers();
@@ -543,10 +546,15 @@ export component AppWindow inherits Window {
     // Maps form-focused-index (and, for the cheat rows and the final
     // Cancel/Save row, form-sub-index) to whichever control it represents;
     // must stay in sync with form-item-count()/form-sub-count() and
-    // AddEditTrainerModal's layout.
-    function activate-form-focused() {
+    // AddEditTrainerModal's layout. The virtual keyboard only opens for an
+    // actual gamepad press - HomeScreen's FocusScope keeps real keyboard
+    // focus even while this form is open, so a physical Return on the Name/
+    // label field must not pop up the on-screen keyboard on top of it.
+    function activate-form-focused(via-gamepad: bool) {
         if root.form-focused-index == 0 {
-            root.open-keyboard("name", -1, root.form-name);
+            if via-gamepad {
+                root.open-keyboard("name", -1, root.form-name);
+            }
         } else if root.form-focused-index == 1 {
             root.browse-exe();
         } else if root.form-focused-index == 2 {
@@ -555,7 +563,9 @@ export component AppWindow inherits Window {
             root.add-cheat-row();
         } else if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
             if root.form-sub-index == 0 {
-                root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 4].id, root.form-cheats[root.form-focused-index - 4].label);
+                if via-gamepad {
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 4].id, root.form-cheats[root.form-focused-index - 4].label);
+                }
             } else if root.form-sub-index == 1 {
                 root.start-cheat-recording(root.form-cheats[root.form-focused-index - 4].id);
             } else if root.form-sub-index == 2 {
@@ -607,14 +617,17 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Dispatches gamepad A/B to whichever popup is currently on top - the
+    // Dispatches A/Return to whichever popup is currently on top - the
     // virtual keyboard (which can itself be layered over the add/edit form),
     // then the quit confirmation, then the key recorder, then add/edit form,
     // then delete confirm - falling back to the home screen's header/list
     // when nothing is open. For the three Cancel/Confirm popups, A applies
     // whichever button confirm-popup-index is currently on rather than
-    // always confirming - left/right (move-horizontal) moves it.
-    public function gamepad-accept() {
+    // always confirming - left/right (move-horizontal) moves it. via-gamepad
+    // is false when this came from HomeScreen's physical-Return handler
+    // (which keeps real keyboard focus even under the add/edit form), so the
+    // virtual keyboard only ever opens for an actual gamepad A press.
+    public function gamepad-accept(via-gamepad: bool) {
         if root.show-keyboard {
             root.activate-keyboard-key();
         } else if root.show-quit-confirm {
@@ -626,13 +639,13 @@ export component AppWindow inherits Window {
                 root.cancel-recording();
             }
         } else if root.show-add-edit {
-            root.activate-form-focused();
+            root.activate-form-focused(via-gamepad);
         } else if root.delete-confirm-id >= 0 {
             root.close-delete-confirm(root.confirm-popup-index == 1);
         } else if root.view == AppView.settings {
             root.activate-settings-focused();
         } else if root.home-header-focused {
-            root.activate-home-header();
+            root.activate-home-header(via-gamepad);
         } else if root.empty-action-focused && root.visible-trainers.length == 0 {
             root.activate-empty-action();
         } else {
@@ -709,7 +722,7 @@ export component AppWindow inherits Window {
         open-settings => { root.open-settings-view(); }
         refresh => { root.refresh-trainers(); }
         launch-trainer(id) => { root.launch-trainer(id); }
-        launch-focused => { root.gamepad-accept(); }
+        launch-focused => { root.gamepad-accept(false); }
         move-selection(delta) => { root.move-selection(delta); }
         move-horizontal(delta) => { root.move-horizontal(delta); }
         edit-trainer(id) => { root.open-edit(id); }
