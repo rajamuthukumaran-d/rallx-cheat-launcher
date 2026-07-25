@@ -55,12 +55,13 @@ export component SettingsScreen inherits Rectangle {
     in property <string> folder-path;
     in property <string> default-shortcut-label;
     in-out property <bool> close-after-launch: true;
+    in-out property <bool> confirm-exit: true;
     // Gamepad focus target; -1 means nothing focused. Rows are: 0 trainer
-    // folder, 1 default shortcut, 2 close-after-launch, 3 accent color,
-    // 4 background, 5 row style. Must stay in sync with AppWindow's
-    // settings-item-count()/activate-settings-focused()/move-settings-value,
-    // which drive this from D-Pad/A/B input (left/right cycle rows 3-5 in
-    // place rather than moving focus further).
+    // folder, 1 default shortcut, 2 close-after-launch, 3 confirm-exit,
+    // 4 accent color, 5 background, 6 row style. Must stay in sync with
+    // AppWindow's settings-item-count()/activate-settings-focused()/
+    // move-settings-value, which drive this from D-Pad/A/B input (left/right
+    // cycle rows 4-6 in place rather than moving focus further).
     in property <int> focused-index: -1;
 
     callback back();
@@ -219,6 +220,41 @@ export component SettingsScreen inherits Rectangle {
                                 checked <=> root.close-after-launch;
                             }
                         }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            cross-axis-alignment: center;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Confirm before closing app";
+                                    color: root.focused-index == 3 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 3 ? 800 : 600;
+                                }
+                                Text {
+                                    text: "Ask before quitting when pressing B on the home screen (gamepad)";
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            ToggleSwitch {
+                                track-width: 46px;
+                                track-height: 26px;
+                                checked <=> root.confirm-exit;
+                            }
+                        }
                     }
                 }
 
@@ -250,9 +286,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Accent color";
-                                color: root.focused-index == 3 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 4 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 3 ? 800 : 600;
+                                font-weight: root.focused-index == 4 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -290,9 +326,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Background";
-                                color: root.focused-index == 4 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 4 ? 800 : 600;
+                                font-weight: root.focused-index == 5 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -319,9 +355,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Row style";
-                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 6 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 5 ? 800 : 600;
+                                font-weight: root.focused-index == 6 ? 800 : 600;
                             }
 
                             HorizontalLayout {

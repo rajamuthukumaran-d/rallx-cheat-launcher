@@ -1,10 +1,9 @@
 import { Theme } from "../theme.slint";
 import { ModalBackdrop } from "../components/modal-backdrop.slint";
 
-export component DeleteConfirmModal inherits ModalBackdrop {
-    in property <string> trainer-name;
+export component QuitConfirmModal inherits ModalBackdrop {
     // Gamepad left/right focus between the two buttons below; true = Confirm
-    // (Delete), false = Cancel. Driven by AppWindow's confirm-popup-index.
+    // (Close app), false = Cancel. Driven by AppWindow's confirm-popup-index.
     in property <bool> confirm-focused: true;
     callback cancel();
     callback confirm();
@@ -27,22 +26,22 @@ export component DeleteConfirmModal inherits ModalBackdrop {
                 width: 52px;
                 height: 52px;
                 border-radius: 26px;
-                background: Theme.danger.transparentize(0.82);
+                background: Theme.panel2;
 
                 Image {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    source: @image-url("../../assets/images/icons/delete.svg");
-                    width: 24px;
-                    height: 24px;
-                    colorize: Theme.danger;
+                    source: @image-url("../../assets/images/icons/close.svg");
+                    width: 22px;
+                    height: 22px;
+                    colorize: Theme.text;
                 }
             }
 
             Rectangle { height: 16px; }
 
             Text {
-                text: "Delete \"\{root.trainer-name}\"?";
+                text: "Close Rallx Cheat Launcher?";
                 font-size: 18px;
                 font-weight: 700;
                 color: Theme.text;
@@ -52,8 +51,8 @@ export component DeleteConfirmModal inherits ModalBackdrop {
             Rectangle { height: 8px; }
 
             Text {
-                width: 320px;
-                text: "This removes the trainer entry. The .exe on disk is not deleted.";
+                width: 300px;
+                text: "This closes the app. You can turn this confirmation off in Settings.";
                 font-size: 14px;
                 color: Theme.text-dim;
                 horizontal-alignment: center;
@@ -92,18 +91,18 @@ export component DeleteConfirmModal inherits ModalBackdrop {
 
                 Rectangle {
                     horizontal-stretch: 1;
-                    background: Theme.danger;
+                    background: Theme.accent;
                     border-radius: 8px;
-                    height: delete-lay.min-height;
+                    height: quit-lay.min-height;
 
-                    delete-lay := HorizontalLayout {
+                    quit-lay := HorizontalLayout {
                         padding-top: 11px;
                         padding-bottom: 11px;
                         alignment: center;
 
                         Text {
-                            text: "Delete";
-                            color: #1a0505;
+                            text: "Close app";
+                            color: Theme.on-accent;
                             font-size: 15px;
                             font-weight: root.confirm-focused ? 900 : 700;
                         }
