@@ -6,6 +6,8 @@ import { ScrollView } from "std-widgets.slint";
 component Pill inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
+    // Gamepad-focus indicator: tints/bolds the label instead of a border ring.
+    in property <bool> focused: false;
     in property <length> min-w: 0px;
     callback clicked();
 
@@ -26,9 +28,9 @@ component Pill inherits Rectangle {
 
         Text {
             text: root.label;
-            color: selected ? Theme.on-accent : Theme.text;
+            color: root.selected ? Theme.on-accent : (root.focused ? Theme.accent : Theme.text);
             font-size: 14px;
-            font-weight: 600;
+            font-weight: root.focused ? (root.selected ? 900 : 800) : 600;
         }
     }
 
@@ -53,6 +55,14 @@ export component SettingsScreen inherits Rectangle {
     in property <string> folder-path;
     in property <string> default-shortcut-label;
     in-out property <bool> close-after-launch: true;
+    in-out property <bool> confirm-exit: true;
+    // Gamepad focus target; -1 means nothing focused. Rows are: 0 trainer
+    // folder, 1 default shortcut, 2 close-after-launch, 3 confirm-exit,
+    // 4 accent color, 5 background, 6 row style. Must stay in sync with
+    // AppWindow's settings-item-count()/activate-settings-focused()/
+    // move-settings-value, which drive this from D-Pad/A/B input (left/right
+    // cycle rows 4-6 in place rather than moving focus further).
+    in property <int> focused-index: -1;
 
     callback back();
     callback browse-folder();
@@ -133,12 +143,18 @@ export component SettingsScreen inherits Rectangle {
                                 spacing: 3px;
                                 alignment: center;
 
-                                Text { text: "Trainer folder"; color: Theme.text; font-size: 16px; font-weight: 600; }
+                                Text {
+                                    text: "Trainer folder";
+                                    color: root.focused-index == 0 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 0 ? 800 : 600;
+                                }
                                 Text { text: root.folder-path; color: Theme.text-dim; font-size: 13px; }
                             }
 
                             Pill {
                                 label: "Browse…";
+                                focused: root.focused-index == 0;
                                 clicked => { root.browse-folder(); }
                             }
                         }
@@ -157,19 +173,24 @@ export component SettingsScreen inherits Rectangle {
                                 spacing: 3px;
                                 alignment: center;
 
-                                Text { text: "Default launch shortcut"; color: Theme.text; font-size: 16px; font-weight: 600; }
+                                Text {
+                                    text: "Default launch shortcut";
+                                    color: root.focused-index == 1 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 1 ? 800 : 600;
+                                }
                                 Text {
                                     text: "Global hotkey to launch the trainer matching the running game";
                                     color: Theme.text-dim;
                                     font-size: 13px;
                                     wrap: word-wrap;
-                                    width: 340px;
                                 }
                             }
 
                             Pill {
                                 label: root.default-shortcut-label;
                                 min-w: 120px;
+                                focused: root.focused-index == 1;
                                 clicked => { root.record-default-shortcut(); }
                             }
                         }
@@ -186,9 +207,9 @@ export component SettingsScreen inherits Rectangle {
                             Text {
                                 horizontal-stretch: 1;
                                 text: "Close app after launching trainer";
-                                color: Theme.text;
+                                color: root.focused-index == 2 ? Theme.accent : Theme.text;
                                 font-size: 16px;
-                                font-weight: 600;
+                                font-weight: root.focused-index == 2 ? 800 : 600;
                                 vertical-alignment: center;
                             }
 
@@ -196,6 +217,35 @@ export component SettingsScreen inherits Rectangle {
                                 track-width: 46px;
                                 track-height: 26px;
                                 checked <=> root.close-after-launch;
+                            }
+                        }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            cross-axis-alignment: center;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Confirm before closing app";
+                                    color: root.focused-index == 3 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 3 ? 800 : 600;
+                                }
+                            }
+
+                            ToggleSwitch {
+                                track-width: 46px;
+                                track-height: 26px;
+                                checked <=> root.confirm-exit;
                             }
                         }
                     }
@@ -220,72 +270,103 @@ export component SettingsScreen inherits Rectangle {
                         padding: 18px;
                         spacing: 10px;
 
-                        Text { text: "Accent color"; color: Theme.text-dim; font-size: 14px; font-weight: 600; }
+                        // Gamepad focus lands on the whole section (a single
+                        // up/down stop); left/right then cycles the value in
+                        // place, so only the section label reflects focus -
+                        // the checkmark/fill already shows the active value.
+                        VerticalLayout {
+                            spacing: 10px;
 
-                        HorizontalLayout {
-                            spacing: 12px;
-                            alignment: start;
+                            Text {
+                                text: "Accent color";
+                                color: root.focused-index == 4 ? Theme.accent : Theme.text-dim;
+                                font-size: 14px;
+                                font-weight: root.focused-index == 4 ? 800 : 600;
+                            }
 
-                            for hex in Palette.accents: Rectangle {
-                                width: 40px;
-                                height: 40px;
-                                border-radius: 20px;
-                                background: hex;
-                                border-width: 2px;
-                                border-color: hex == Theme.accent ? Theme.text : transparent;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                alignment: start;
 
-                                if hex == Theme.accent: Image {
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    source: @image-url("../../assets/images/icons/check.svg");
-                                    width: 18px;
-                                    height: 18px;
-                                    colorize: Theme.on-accent;
-                                }
+                                for hex in Palette.accents: Rectangle {
+                                    width: 40px;
+                                    height: 40px;
+                                    border-radius: 20px;
+                                    background: hex;
+                                    border-width: hex == Theme.accent ? 2px : 0px;
+                                    border-color: Theme.text;
 
-                                TouchArea {
-                                    clicked => { Theme.accent = hex; }
+                                    if hex == Theme.accent: Image {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        source: @image-url("../../assets/images/icons/check.svg");
+                                        width: 18px;
+                                        height: 18px;
+                                        colorize: Theme.on-accent;
+                                    }
+
+                                    TouchArea {
+                                        clicked => { Theme.accent = hex; }
+                                    }
                                 }
                             }
                         }
 
-                        Rectangle { height: 12px; }
+                        Rectangle { height: 2px; }
 
-                        Text { text: "Background"; color: Theme.text-dim; font-size: 14px; font-weight: 600; }
-
-                        HorizontalLayout {
+                        VerticalLayout {
                             spacing: 10px;
-                            alignment: start;
 
-                            Pill {
-                                label: "Dark";
-                                selected: Theme.dark;
-                                clicked => { Theme.dark = true; }
+                            Text {
+                                text: "Background";
+                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
+                                font-size: 14px;
+                                font-weight: root.focused-index == 5 ? 800 : 600;
                             }
-                            Pill {
-                                label: "Light";
-                                selected: !Theme.dark;
-                                clicked => { Theme.dark = false; }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+
+                                Pill {
+                                    label: "Dark";
+                                    selected: Theme.dark;
+                                    clicked => { Theme.dark = true; }
+                                }
+                                Pill {
+                                    label: "Light";
+                                    selected: !Theme.dark;
+                                    clicked => { Theme.dark = false; }
+                                }
                             }
                         }
 
-                        Rectangle { height: 12px; }
+                        Rectangle { height: 2px; }
 
-                        Text { text: "Row style"; color: Theme.text-dim; font-size: 14px; font-weight: 600; }
-
-                        HorizontalLayout {
+                        VerticalLayout {
                             spacing: 10px;
-                            alignment: start;
 
-                            Pill {
-                                label: "Comfortable";
-                                selected: !Theme.compact;
-                                clicked => { Theme.compact = false; }
+                            Text {
+                                text: "Row style";
+                                color: root.focused-index == 6 ? Theme.accent : Theme.text-dim;
+                                font-size: 14px;
+                                font-weight: root.focused-index == 6 ? 800 : 600;
                             }
-                            Pill {
-                                label: "Compact";
-                                selected: Theme.compact;
-                                clicked => { Theme.compact = true; }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+
+                                Pill {
+                                    label: "Comfortable";
+                                    selected: !Theme.compact;
+                                    clicked => { Theme.compact = false; }
+                                }
+                                Pill {
+                                    label: "Compact";
+                                    selected: Theme.compact;
+                                    clicked => { Theme.compact = true; }
+                                }
                             }
                         }
                     }

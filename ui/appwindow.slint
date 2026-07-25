@@ -1,10 +1,13 @@
-import { Theme } from "theme.slint";
+import { Theme, Palette } from "theme.slint";
 import { TrainerItem, CheatEntry } from "types.slint";
+import { KeyboardLayout } from "keyboard-layout.slint";
 import { HomeScreen } from "screens/home-screen.slint";
 import { SettingsScreen } from "screens/settings-screen.slint";
 import { DeleteConfirmModal } from "modals/delete-confirm-modal.slint";
 import { AddEditTrainerModal } from "modals/add-edit-trainer-modal.slint";
 import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
+import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
+import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
 
 export { TrainerItem, CheatEntry }
@@ -25,6 +28,28 @@ export component AppWindow inherits Window {
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in-out property <bool> close-after-launch: true;
+    // Whether B on Home (with nothing else open) shows a confirmation before
+    // quitting, or quits immediately. Toggle lives in Settings.
+    in-out property <bool> confirm-exit: true;
+    in-out property <bool> show-quit-confirm: false;
+    // Left/right position shared by the delete-confirm, key-recorder, and
+    // quit-confirm popups' Cancel/Confirm button pair - they're mutually
+    // exclusive, so one property covers all three. 0 = Cancel, 1 = Confirm;
+    // defaults to (and is reset back to) Confirm on every open/close so A
+    // confirms unless the user has explicitly moved off it.
+    in-out property <int> confirm-popup-index: 1;
+    // Defaults to the first row so the trainer list is already highlighted
+    // when the app opens, before any gamepad/keyboard input.
+    in-out property <int> focused-index: 0;
+    // True when focus has moved off the trainer list up into the home
+    // screen's header row (Search/Refresh/Edit/Add/Settings).
+    in-out property <bool> home-header-focused: false;
+    in-out property <int> home-header-index: 0;
+    // True when the trainer list is empty and gamepad/keyboard focus is on
+    // the single action button shown in its place ("Add trainer" or, when a
+    // search is filtering everything out, "Clear search").
+    in-out property <bool> empty-action-focused: false;
+    in-out property <int> settings-focused-index: -1;
 
     in-out property <[TrainerItem]> visible-trainers: [];
     in-out property <int> trainer-count: 0;
@@ -45,17 +70,630 @@ export component AppWindow inherits Window {
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
     in-out property <[CheatEntry]> form-cheats: [];
+    // Gamepad focus target spanning the whole add/edit form: 0 Name,
+    // 1 Game executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
+    // then Cancel/Save last. Keep in sync with form-item-count()/
+    // activate-form-focused() below and AddEditTrainerModal's layout.
+    in-out property <int> form-focused-index: -1;
+    // Left/right position within the current form-focused-index row, for
+    // rows with more than one field/button (a cheat row's label/record/
+    // remove, or the final Cancel/Save row). Reset to 0 on every row change.
+    in-out property <int> form-sub-index: 0;
 
     in-out property <bool> recording: false;
     in-out property <string> recording-target: "";
     in-out property <int> recording-cheat-id: -1;
     in-out property <string> recorded-combo: "";
 
+    // Virtual keyboard: a gamepad-only alternative to typing, opened via A on
+    // a focused text field (search box, trainer name, cheat label). keyboard-
+    // target picks which underlying value keyboard-char/keyboard-backspace
+    // (handled in Rust) edit: "search" | "name" | "cheat".
+    in-out property <bool> show-keyboard: false;
+    in-out property <string> keyboard-target: "";
+    in-out property <int> keyboard-cheat-id: -1;
+    in-out property <string> keyboard-preview: "";
+    in-out property <bool> keyboard-shift: false;
+    in-out property <int> keyboard-row: 0;
+    in-out property <int> keyboard-col: 0;
+
     in-out property <bool> show-toast: false;
     in-out property <string> toast-message: "";
 
     callback launch-trainer(int);
     callback refresh-trainers();
+
+    public function launch-focused-trainer() {
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.launch-trainer(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    // True while any popup (key recorder, add/edit form, delete confirm) is
+    // on top of the screen - gamepad actions that act on background state
+    // (list navigation, edit/delete/copy, search, settings) must no-op so a
+    // popup press can't leak through to whatever is behind it.
+    function popup-open() -> bool {
+        return root.other-popup-open() || root.show-keyboard;
+    }
+
+    // popup-open() minus the keyboard itself, for the few actions (namely Y/
+    // open-search-keyboard) that need to run *while* the keyboard is open.
+    function other-popup-open() -> bool {
+        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0 || root.show-quit-confirm;
+    }
+
+    // Keep in sync with SettingsScreen's control layout: trainer folder,
+    // default shortcut, close-after-launch, confirm-before-close, accent
+    // color, background, row style - each a single up/down stop; accent/
+    // background/row-style are then cycled in place with left/right (see
+    // move-settings-value).
+    function settings-item-count() -> int {
+        return 7;
+    }
+
+    // Slint's imperative `for` has no index binding (only the declarative
+    // repeater does), so the current accent's position is found by direct
+    // comparison rather than a loop.
+    function accent-index() -> int {
+        if Theme.accent == Palette.accents[0] {
+            return 0;
+        } else if Theme.accent == Palette.accents[1] {
+            return 1;
+        } else if Theme.accent == Palette.accents[2] {
+            return 2;
+        } else if Theme.accent == Palette.accents[3] {
+            return 3;
+        } else if Theme.accent == Palette.accents[4] {
+            return 4;
+        }
+        return 0;
+    }
+
+    function cycle-accent(delta: int) {
+        Theme.accent = Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)];
+    }
+
+    function move-settings-value(delta: int) {
+        if root.settings-focused-index == 4 {
+            root.cycle-accent(delta);
+        } else if root.settings-focused-index == 5 {
+            Theme.dark = !Theme.dark;
+        } else if root.settings-focused-index == 6 {
+            Theme.compact = !Theme.compact;
+        }
+    }
+
+    function move-settings-selection(delta: int) {
+        if root.settings-focused-index < 0 {
+            root.settings-focused-index = 0;
+        } else {
+            root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
+        }
+    }
+
+    // Name, Game executable, Shortcut, Add cheat, one stop per cheat row,
+    // Cancel/Save.
+    function form-item-count() -> int {
+        return 5 + root.form-cheats.length;
+    }
+
+    function move-form-selection(delta: int) {
+        if root.form-focused-index < 0 {
+            root.form-focused-index = 0;
+        } else {
+            root.form-focused-index = max(0, min(root.form-focused-index + delta, root.form-item-count() - 1));
+        }
+        root.form-sub-index = 0;
+    }
+
+    // How many fields/buttons share the current form-focused-index row: 3 for
+    // a cheat row (label, record key, remove), 2 for the final Cancel/Save
+    // row, 1 everywhere else.
+    function form-sub-count() -> int {
+        if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
+            return 3;
+        } else if root.form-focused-index == 4 + root.form-cheats.length {
+            return 2;
+        }
+        return 1;
+    }
+
+    function move-form-sub-selection(delta: int) {
+        if root.form-focused-index < 0 {
+            return;
+        }
+        root.form-sub-index = max(0, min(root.form-sub-index + delta, root.form-sub-count() - 1));
+    }
+
+    // Home screen header has 5 stops: Search, Refresh, Edit, Add, Settings.
+    // Keep in sync with activate-home-header() and HomeScreen's layout.
+    function move-home-header(delta: int) {
+        root.home-header-index = max(0, min(root.home-header-index + delta, 4));
+    }
+
+    function move-keyboard-vertical(delta: int) {
+        root.keyboard-row = max(0, min(root.keyboard-row + delta, KeyboardLayout.rows.length - 1));
+        root.keyboard-col = min(root.keyboard-col, KeyboardLayout.rows[root.keyboard-row].length - 1);
+    }
+
+    function move-keyboard-horizontal(delta: int) {
+        root.keyboard-col = max(0, min(root.keyboard-col + delta, KeyboardLayout.rows[root.keyboard-row].length - 1));
+    }
+
+    // Left/right: cycles the focused settings row's value, moves between
+    // fields/buttons within the add/edit form's focused row, moves between
+    // the Cancel/Confirm buttons of whichever confirm-style popup is on top,
+    // moves between header buttons on the home screen, or moves across the
+    // virtual keyboard's key grid.
+    public function move-horizontal(delta: int) {
+        if root.show-keyboard {
+            root.move-keyboard-horizontal(delta);
+            return;
+        }
+        if root.recording || root.delete-confirm-id >= 0 || root.show-quit-confirm {
+            root.confirm-popup-index = max(0, min(root.confirm-popup-index + delta, 1));
+            return;
+        }
+        if root.show-add-edit {
+            root.move-form-sub-selection(delta);
+        } else if root.view == AppView.settings {
+            root.move-settings-value(delta);
+        } else if root.home-header-focused {
+            root.move-home-header(delta);
+        }
+    }
+
+    public function move-selection(delta: int) {
+        // The virtual keyboard takes over up/down for its own key grid
+        // whenever it's open, even over an add/edit form or settings screen
+        // behind it. The key recorder and delete confirm have nothing to
+        // navigate, so they still block navigation entirely; the add/edit
+        // form is itself navigable, so it's handled instead of blocked.
+        if root.show-keyboard {
+            root.move-keyboard-vertical(delta);
+            return;
+        }
+        if root.recording || root.delete-confirm-id >= 0 || root.show-quit-confirm {
+            return;
+        }
+        if root.show-add-edit {
+            root.move-form-selection(delta);
+            return;
+        }
+        if root.view == AppView.settings {
+            root.move-settings-selection(delta);
+            return;
+        }
+        // Home screen: header <-> trainer list <-> (when the list is empty)
+        // the single empty-state action button. Up from the first row moves
+        // into the header; Down from the header returns to wherever the list
+        // was left focused, while Up from the header wraps to the last row.
+        // With an empty list, Down from the header (or from nowhere yet)
+        // lands on the action button instead, and Up from it goes back.
+        if root.empty-action-focused && root.visible-trainers.length > 0 {
+            // The list was repopulated (e.g. a query typed on a real
+            // keyboard now matches something) while focus was stuck on the
+            // now-hidden action button - drop back to normal list nav.
+            root.empty-action-focused = false;
+        }
+        if root.home-header-focused {
+            if delta > 0 {
+                root.home-header-focused = false;
+                if root.visible-trainers.length == 0 {
+                    root.empty-action-focused = true;
+                } else if root.focused-index < 0 {
+                    root.focused-index = 0;
+                }
+            } else if delta < 0 && root.visible-trainers.length > 0 {
+                root.home-header-focused = false;
+                root.focused-index = root.visible-trainers.length - 1;
+            }
+            return;
+        }
+        if root.empty-action-focused {
+            if delta < 0 {
+                root.empty-action-focused = false;
+                root.home-header-focused = true;
+            }
+            return;
+        }
+        if root.visible-trainers.length == 0 {
+            if delta > 0 {
+                root.empty-action-focused = true;
+            } else {
+                root.home-header-focused = true;
+            }
+            return;
+        }
+        if delta < 0 && root.focused-index <= 0 {
+            root.home-header-focused = true;
+            return;
+        }
+        if root.focused-index < 0 {
+            root.focused-index = 0;
+        } else if delta > 0 && root.focused-index >= root.visible-trainers.length - 1 {
+            // Down from the last row loops back to the top of the list
+            // (Up from the first row already goes to the header instead).
+            root.focused-index = 0;
+        } else {
+            root.focused-index = max(0, min(root.focused-index + delta, root.visible-trainers.length - 1));
+        }
+    }
+
+    // X: edits the focused trainer, or - while the virtual keyboard is open -
+    // deletes the last typed character instead. Like the other trainer-row
+    // actions (delete/copy) this only applies on the home screen; the view
+    // check stops a Settings-screen press from acting on the stale home focus.
+    public function edit-focused-trainer() {
+        if root.show-keyboard {
+            root.keyboard-backspace();
+            return;
+        }
+        if root.popup-open() || root.view != AppView.home {
+            return;
+        }
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.open-edit(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function delete-focused-trainer() {
+        if root.popup-open() || root.view != AppView.home {
+            return;
+        }
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.request-delete(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function copy-focused-trainer() {
+        if root.popup-open() || root.view != AppView.home {
+            return;
+        }
+        if root.focused-index >= 0 && root.focused-index < root.visible-trainers.length {
+            root.copy-script(root.visible-trainers[root.focused-index].id);
+        }
+    }
+
+    public function toggle-search() {
+        if root.popup-open() {
+            return;
+        }
+        root.show-search = !root.show-search;
+        if !root.show-search {
+            root.search-query = "";
+            root.search-changed("");
+        }
+    }
+
+    // Y: the dedicated "start typing into search" shortcut - opens the
+    // search box (if closed) and the virtual keyboard together, or just
+    // brings the keyboard back if it was closed while search stayed open.
+    // While the keyboard is already open, Y instead types a space (see
+    // gamepad.rs), which is why this checks show-keyboard before the usual
+    // other-popup-open() guard rather than reusing popup-open().
+    public function open-search-keyboard() {
+        if root.show-keyboard {
+            root.keyboard-char(" ");
+            return;
+        }
+        if root.other-popup-open() || root.view != AppView.home {
+            return;
+        }
+        root.show-search = true;
+        root.home-header-focused = true;
+        root.home-header-index = 0;
+        root.open-keyboard("search", -1, root.search-query);
+    }
+
+    // True while gamepad/keyboard focus is actually sitting on the search
+    // box (header index 0) - as opposed to just "search happens to be open,
+    // but focus moved elsewhere" - so RT doesn't reach across the screen and
+    // reopen the keyboard while e.g. a trainer row is focused instead.
+    function search-focused() -> bool {
+        return root.home-header-focused && root.home-header-index == 0;
+    }
+
+    // A on the empty-state action button: "Add trainer" normally, or - when
+    // a query is what's filtering the list down to nothing - clears and
+    // closes the search box entirely, same as the header's close icon.
+    function activate-empty-action() {
+        if root.search-query.is-empty {
+            root.open-add();
+        } else {
+            root.toggle-search();
+            root.empty-action-focused = false;
+        }
+    }
+
+    public function open-settings-view() {
+        if root.popup-open() {
+            return;
+        }
+        root.settings-focused-index = -1;
+        root.view = AppView.settings;
+    }
+
+    function open-keyboard(target: string, cheat-id: int, initial-text: string) {
+        root.keyboard-target = target;
+        root.keyboard-cheat-id = cheat-id;
+        root.keyboard-preview = initial-text;
+        root.keyboard-row = 0;
+        root.keyboard-col = 0;
+        root.keyboard-shift = false;
+        root.show-keyboard = true;
+    }
+
+    function close-keyboard() {
+        root.show-keyboard = false;
+    }
+
+    // LT held: momentary shift, independent of the on-screen SHIFT key's
+    // toggle/lock - releasing LT always drops back to lowercase.
+    public function keyboard-shift-hold(held: bool) {
+        if root.show-keyboard {
+            root.keyboard-shift = held;
+        }
+    }
+
+    // RT: while the keyboard is open (search, name, or a cheat label),
+    // closes it, same as Done/B. While the search box specifically is open
+    // *and* still has focus, RT instead reopens it - so RT toggles the
+    // keyboard back and forth without touching the search bar itself, but
+    // won't reach across the screen and pop it open if focus has since moved
+    // to, say, a trainer row.
+    public function keyboard-right-trigger() {
+        if root.show-keyboard {
+            root.close-keyboard();
+        } else if root.show-search && root.search-focused() {
+            root.open-keyboard("search", -1, root.search-query);
+        }
+    }
+
+    // Maps (keyboard-row, keyboard-col) to whichever key it represents, per
+    // KeyboardLayout.rows; must stay in sync with VirtualKeyboardModal's
+    // rendering. keyboard-char/keyboard-backspace are handled in Rust, which
+    // owns the actual string editing and writes the result back to whichever
+    // field keyboard-target names.
+    function activate-keyboard-key() {
+        if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SHIFT" {
+            root.keyboard-shift = !root.keyboard-shift;
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "BACK" {
+            root.keyboard-backspace();
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SPACE" {
+            root.keyboard-char(" ");
+        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "DONE" {
+            root.close-keyboard();
+        } else if root.keyboard-shift {
+            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col].to-uppercase());
+        } else {
+            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col]);
+        }
+    }
+
+    // Maps home-header-index to whichever header button it represents; must
+    // stay in sync with move-home-header() and HomeScreen's header layout.
+    // Index 0 opens/closes the search box, and - only when triggered by an
+    // actual gamepad press, not the physical Return key - the virtual
+    // keyboard alongside it, same as Y from a closed state; RT then toggles
+    // just the keyboard without touching the search box once it's open.
+    function activate-home-header(via-gamepad: bool) {
+        if root.home-header-index == 0 {
+            if root.show-search {
+                root.toggle-search();
+                root.close-keyboard();
+            } else {
+                root.toggle-search();
+                if via-gamepad {
+                    root.open-keyboard("search", -1, root.search-query);
+                }
+            }
+        } else if root.home-header-index == 1 {
+            root.refresh-trainers();
+        } else if root.home-header-index == 2 {
+            root.edit-mode = !root.edit-mode;
+        } else if root.home-header-index == 3 {
+            root.open-add();
+        } else if root.home-header-index == 4 {
+            root.open-settings-view();
+        }
+    }
+
+    function go-home() {
+        root.settings-focused-index = -1;
+        root.view = AppView.home;
+    }
+
+    function start-default-shortcut-recording() {
+        root.recording-target = "default";
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    function start-shortcut-recording() {
+        root.recording-target = "shortcut";
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    function start-cheat-recording(id: int) {
+        root.recording-target = "cheat";
+        root.recording-cheat-id = id;
+        root.recorded-combo = "";
+        root.recording = true;
+    }
+
+    // Maps settings-focused-index to whichever control it represents. Rows
+    // 4-6 (accent/background/row-style) are cycled with left/right instead -
+    // see move-settings-value - so A is a no-op there.
+    function activate-settings-focused() {
+        if root.settings-focused-index == 0 {
+            root.browse-folder();
+        } else if root.settings-focused-index == 1 {
+            root.start-default-shortcut-recording();
+        } else if root.settings-focused-index == 2 {
+            root.close-after-launch = !root.close-after-launch;
+        } else if root.settings-focused-index == 3 {
+            root.confirm-exit = !root.confirm-exit;
+        }
+    }
+
+    function cancel-form() {
+        root.show-add-edit = false;
+        root.form-focused-index = -1;
+        root.form-sub-index = 0;
+    }
+
+    // Maps form-focused-index (and, for the cheat rows and the final
+    // Cancel/Save row, form-sub-index) to whichever control it represents;
+    // must stay in sync with form-item-count()/form-sub-count() and
+    // AddEditTrainerModal's layout. The virtual keyboard only opens for an
+    // actual gamepad press - AppWindow's key-scope keeps real keyboard focus
+    // even while this form is open, so a physical Return on the Name/label
+    // field must not pop up the on-screen keyboard on top of it.
+    function activate-form-focused(via-gamepad: bool) {
+        if root.form-focused-index == 0 {
+            if via-gamepad {
+                root.open-keyboard("name", -1, root.form-name);
+            }
+        } else if root.form-focused-index == 1 {
+            root.browse-exe();
+        } else if root.form-focused-index == 2 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 3 {
+            root.add-cheat-row();
+        } else if root.form-focused-index >= 4 && root.form-focused-index < 4 + root.form-cheats.length {
+            if root.form-sub-index == 0 {
+                if via-gamepad {
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 4].id, root.form-cheats[root.form-focused-index - 4].label);
+                }
+            } else if root.form-sub-index == 1 {
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 4].id);
+            } else if root.form-sub-index == 2 {
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 4].id);
+            }
+        } else if root.form-focused-index == 4 + root.form-cheats.length {
+            if root.form-sub-index == 0 {
+                root.cancel-form();
+            } else {
+                root.save-form();
+            }
+        }
+    }
+
+    function confirm-recording() {
+        if root.recording-target == "cheat" {
+            root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
+        } else if root.recording-target == "shortcut" {
+            root.form-shortcut = root.recorded-combo;
+            root.form-shortcut-display = root.recorded-combo;
+        } else {
+            root.default-shortcut-label = root.recorded-combo;
+        }
+        root.recording = false;
+        root.recorded-combo = "";
+        root.confirm-popup-index = 1;
+    }
+
+    function cancel-recording() {
+        root.recording = false;
+        root.recorded-combo = "";
+        root.confirm-popup-index = 1;
+    }
+
+    function close-delete-confirm(confirmed: bool) {
+        if confirmed {
+            root.confirm-delete(root.delete-confirm-id);
+        } else {
+            root.delete-confirm-id = -1;
+        }
+        root.confirm-popup-index = 1;
+    }
+
+    function close-quit-confirm(confirmed: bool) {
+        root.show-quit-confirm = false;
+        root.confirm-popup-index = 1;
+        if confirmed {
+            root.quit-app();
+        }
+    }
+
+    // Dispatches A/Return to whichever popup is currently on top - the
+    // virtual keyboard (which can itself be layered over the add/edit form),
+    // then the quit confirmation, then the key recorder, then add/edit form,
+    // then delete confirm - falling back to the home screen's header/list
+    // when nothing is open. For the three Cancel/Confirm popups, A applies
+    // whichever button confirm-popup-index is currently on rather than
+    // always confirming - left/right (move-horizontal) moves it. via-gamepad
+    // is false when this came from HomeScreen's physical-Return handler
+    // (which keeps real keyboard focus even under the add/edit form), so the
+    // virtual keyboard only ever opens for an actual gamepad A press.
+    public function gamepad-accept(via-gamepad: bool) {
+        if root.show-keyboard {
+            root.activate-keyboard-key();
+        } else if root.show-quit-confirm {
+            root.close-quit-confirm(root.confirm-popup-index == 1);
+        } else if root.recording {
+            if root.confirm-popup-index == 1 {
+                root.confirm-recording();
+            } else {
+                root.cancel-recording();
+            }
+        } else if root.show-add-edit {
+            root.activate-form-focused(via-gamepad);
+        } else if root.delete-confirm-id >= 0 {
+            root.close-delete-confirm(root.confirm-popup-index == 1);
+        } else if root.view == AppView.settings {
+            root.activate-settings-focused();
+        } else if root.home-header-focused {
+            root.activate-home-header(via-gamepad);
+        } else if root.empty-action-focused && root.visible-trainers.length == 0 {
+            root.activate-empty-action();
+        } else {
+            if root.empty-action-focused {
+                // The list was repopulated while focus stayed on the now-hidden
+                // empty-state button (same self-heal as move-selection); recover
+                // by selecting the first row rather than no-opping on a stale
+                // focused-index.
+                root.empty-action-focused = false;
+                if root.focused-index < 0 {
+                    root.focused-index = 0;
+                }
+            }
+            root.launch-focused-trainer();
+        }
+    }
+
+    // B: closes whichever popup is on top (including the quit confirmation
+    // itself), clears and closes an open search box, backs out of Settings,
+    // or - with nothing left to back out of - either quits immediately or
+    // asks for confirmation first, per confirm-exit. Unlike A, B always
+    // cancels regardless of confirm-popup-index - it's a dedicated cancel
+    // button.
+    public function gamepad-cancel() {
+        if root.show-keyboard {
+            root.close-keyboard();
+        } else if root.show-quit-confirm {
+            root.close-quit-confirm(false);
+        } else if root.recording {
+            root.cancel-recording();
+        } else if root.show-add-edit {
+            root.cancel-form();
+        } else if root.delete-confirm-id >= 0 {
+            root.close-delete-confirm(false);
+        } else if root.view == AppView.settings {
+            root.go-home();
+        } else if root.show-search {
+            root.toggle-search();
+        } else if root.confirm-exit {
+            root.show-quit-confirm = true;
+        } else {
+            root.quit-app();
+        }
+    }
+
+    callback quit-app();
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
@@ -69,6 +707,8 @@ export component AppWindow inherits Window {
     callback remove-cheat-row(int);
     callback set-cheat-label(int, string);
     callback set-cheat-key(int, string);
+    callback keyboard-char(string);
+    callback keyboard-backspace();
 
     Timer {
         interval: 1800ms;
@@ -76,98 +716,150 @@ export component AppWindow inherits Window {
         triggered => { root.show-toast = false; }
     }
 
-    if root.view == AppView.home: HomeScreen {
+    // Global keyboard navigation, mirroring the gamepad one-for-one. This
+    // FocusScope wraps the whole UI and holds focus for the app, translating
+    // keys into the exact same functions gamepad.rs invokes: arrows ->
+    // move-selection/move-horizontal, Enter = A (gamepad-accept), Esc = B
+    // (gamepad-cancel). Wrapping (rather than sitting beside) the content
+    // matters: text inputs and the key recorder steal focus while active, but
+    // being their ancestor, this scope still receives the keys they don't
+    // consume (arrows, Enter, Esc) so navigation keeps working even while
+    // typing. via-gamepad is false so a physical Enter never opens the
+    // on-screen keyboard. The `changed` hooks below hand focus back to this
+    // scope when a focus-stealing input closes.
+    key-scope := FocusScope {
         width: 100%;
         height: 100%;
-        edit-mode <=> root.edit-mode;
-        show-search <=> root.show-search;
-        search-query <=> root.search-query;
-        visible-trainers: root.visible-trainers;
-        trainer-count: root.trainer-count;
-        total-size-label: root.total-size-label;
+        init => { self.focus(); }
 
-        open-add => { root.open-add(); }
-        open-settings => { root.view = AppView.settings; }
-        refresh => { root.refresh-trainers(); }
-        launch-trainer(id) => { root.launch-trainer(id); }
-        edit-trainer(id) => { root.open-edit(id); }
-        delete-trainer(id) => { root.request-delete(id); }
-        copy-trainer(id) => { root.copy-script(id); }
-        search-changed(q) => { root.search-changed(q); }
-    }
-
-    if root.view == AppView.settings: SettingsScreen {
-        width: 100%;
-        height: 100%;
-        folder-path: root.folder-path;
-        default-shortcut-label: root.default-shortcut-label;
-        close-after-launch <=> root.close-after-launch;
-
-        back => { root.view = AppView.home; }
-        browse-folder => { root.browse-folder(); }
-        record-default-shortcut => {
-            root.recording-target = "default";
-            root.recorded-combo = "";
-            root.recording = true;
-        }
-    }
-
-    if root.delete-confirm-id >= 0: DeleteConfirmModal {
-        trainer-name: root.delete-confirm-name;
-        cancel => { root.delete-confirm-id = -1; }
-        confirm => { root.confirm-delete(root.delete-confirm-id); }
-    }
-
-    if root.show-add-edit: AddEditTrainerModal {
-        title-text: root.form-title;
-        save-label: root.form-save-label;
-        form-name <=> root.form-name;
-        form-exe-display: root.form-exe-display;
-        form-shortcut-display: root.form-shortcut-display;
-        cheats: root.form-cheats;
-
-        name-changed(v) => { root.form-name = v; }
-        browse-exe => { root.browse-exe(); }
-        record-shortcut => {
-            root.recording-target = "shortcut";
-            root.recorded-combo = "";
-            root.recording = true;
-        }
-        add-cheat => { root.add-cheat-row(); }
-        remove-cheat(id) => { root.remove-cheat-row(id); }
-        cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
-        record-cheat(id) => {
-            root.recording-target = "cheat";
-            root.recording-cheat-id = id;
-            root.recorded-combo = "";
-            root.recording = true;
-        }
-        cancel => { root.show-add-edit = false; }
-        save => { root.save-form(); }
-    }
-
-    if root.recording: KeyRecorderModal {
-        recorded-combo <=> root.recorded-combo;
-        cancel => {
-            root.recording = false;
-            root.recorded-combo = "";
-        }
-        confirm => {
-            if root.recording-target == "cheat" {
-                root.set-cheat-key(root.recording-cheat-id, root.recorded-combo);
-            } else if root.recording-target == "shortcut" {
-                root.form-shortcut = root.recorded-combo;
-                root.form-shortcut-display = root.recorded-combo;
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                root.move-selection(1);
+                accept
+            } else if (event.text == Key.UpArrow) {
+                root.move-selection(-1);
+                accept
+            } else if (event.text == Key.LeftArrow) {
+                root.move-horizontal(-1);
+                accept
+            } else if (event.text == Key.RightArrow) {
+                root.move-horizontal(1);
+                accept
+            } else if (event.text == Key.Return) {
+                root.gamepad-accept(false);
+                accept
+            } else if (event.text == Key.Escape) {
+                root.gamepad-cancel();
+                accept
             } else {
-                root.default-shortcut-label = root.recorded-combo;
+                reject
             }
-            root.recording = false;
-            root.recorded-combo = "";
+        }
+
+        if root.view == AppView.home: HomeScreen {
+            width: 100%;
+            height: 100%;
+            edit-mode <=> root.edit-mode;
+            show-search <=> root.show-search;
+            search-query <=> root.search-query;
+            focused-index <=> root.focused-index;
+            header-focused: root.home-header-focused;
+            header-index: root.home-header-index;
+            empty-action-focused: root.empty-action-focused;
+            visible-trainers: root.visible-trainers;
+            trainer-count: root.trainer-count;
+            total-size-label: root.total-size-label;
+
+            open-add => { root.open-add(); }
+            open-settings => { root.open-settings-view(); }
+            refresh => { root.refresh-trainers(); }
+            launch-trainer(id) => { root.launch-trainer(id); }
+            edit-trainer(id) => { root.open-edit(id); }
+            delete-trainer(id) => { root.request-delete(id); }
+            copy-trainer(id) => { root.copy-script(id); }
+            search-changed(q) => { root.search-changed(q); }
+        }
+
+        if root.view == AppView.settings: SettingsScreen {
+            width: 100%;
+            height: 100%;
+            folder-path: root.folder-path;
+            default-shortcut-label: root.default-shortcut-label;
+            close-after-launch <=> root.close-after-launch;
+            confirm-exit <=> root.confirm-exit;
+            focused-index: root.settings-focused-index;
+
+            back => { root.go-home(); }
+            browse-folder => { root.browse-folder(); }
+            record-default-shortcut => { root.start-default-shortcut-recording(); }
+        }
+
+        if root.delete-confirm-id >= 0: DeleteConfirmModal {
+            trainer-name: root.delete-confirm-name;
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-delete-confirm(false); }
+            confirm => { root.close-delete-confirm(true); }
+        }
+
+        if root.show-quit-confirm: QuitConfirmModal {
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-quit-confirm(false); }
+            confirm => { root.close-quit-confirm(true); }
+        }
+
+        if root.show-add-edit: AddEditTrainerModal {
+            title-text: root.form-title;
+            save-label: root.form-save-label;
+            form-name <=> root.form-name;
+            form-exe-display: root.form-exe-display;
+            form-shortcut-display: root.form-shortcut-display;
+            cheats: root.form-cheats;
+            focused-index: root.form-focused-index;
+            sub-index: root.form-sub-index;
+
+            name-changed(v) => { root.form-name = v; }
+            browse-exe => { root.browse-exe(); }
+            record-shortcut => { root.start-shortcut-recording(); }
+            add-cheat => { root.add-cheat-row(); }
+            remove-cheat(id) => { root.remove-cheat-row(id); }
+            cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
+            record-cheat(id) => { root.start-cheat-recording(id); }
+            cancel => { root.cancel-form(); }
+            save => { root.save-form(); }
+        }
+
+        if root.recording: KeyRecorderModal {
+            recorded-combo <=> root.recorded-combo;
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.cancel-recording(); }
+            confirm => { root.confirm-recording(); }
+        }
+
+        if root.show-keyboard: VirtualKeyboardModal {
+            preview: root.keyboard-preview;
+            shift: root.keyboard-shift;
+            focused-row: root.keyboard-row;
+            focused-col: root.keyboard-col;
+
+            close => { root.close-keyboard(); }
+            key-tapped(r, c) => {
+                root.keyboard-row = r;
+                root.keyboard-col = c;
+                root.activate-keyboard-key();
+            }
+        }
+
+        Toast {
+            message: root.toast-message;
+            show: root.show-toast;
         }
     }
 
-    Toast {
-        message: root.toast-message;
-        show: root.show-toast;
-    }
+    // Return focus to key-scope whenever a focus-stealing input closes (the
+    // search box and add/edit text fields auto-focus themselves; the key
+    // recorder grabs focus to capture a combo), so keyboard nav resumes.
+    changed show-search => { if (!root.show-search) { key-scope.focus(); } }
+    changed recording => { if (!root.recording) { key-scope.focus(); } }
+    changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
+    changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
 }

@@ -9,10 +9,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 use crate::config::{AppConfig, TrainerConfig};
-use crate::{trainer, AppWindow, CheatEntry, TrainerItem};
+use crate::{exe_icon, trainer, AppWindow, CheatEntry, TrainerItem};
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
     (0x5b, 0x8c, 0xff),
@@ -45,19 +45,22 @@ fn make_cheat(state: &AppState, label: &str, key: &str) -> CheatEntry {
     }
 }
 
-fn make_trainer(
-    state: &AppState,
-    name: &str,
-    version: &str,
-    size: &str,
-    exe: &str,
-    shortcut: &str,
+struct NewTrainer<'a> {
+    name: &'a str,
+    version: &'a str,
+    size: &'a str,
+    exe: &'a str,
+    shortcut: &'a str,
     cheats: Vec<CheatEntry>,
-) -> TrainerItem {
+    icon: Option<Image>,
+}
+
+fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
     let id = state.next_trainer_id.get();
     state.next_trainer_id.set(id + 1);
     let color = row_color(id as usize);
-    let letter = name
+    let letter = fields
+        .name
         .chars()
         .next()
         .unwrap_or('?')
@@ -65,14 +68,16 @@ fn make_trainer(
         .to_string();
     TrainerItem {
         id,
-        name: name.into(),
-        version: version.into(),
-        size: size.into(),
-        exe: exe.into(),
-        shortcut: shortcut.into(),
+        name: fields.name.into(),
+        version: fields.version.into(),
+        size: fields.size.into(),
+        exe: fields.exe.into(),
+        shortcut: fields.shortcut.into(),
         color,
         letter: letter.into(),
-        cheats: ModelRc::new(VecModel::from(cheats)),
+        has_icon: fields.icon.is_some(),
+        icon: fields.icon.unwrap_or_default(),
+        cheats: ModelRc::new(VecModel::from(fields.cheats)),
     }
 }
 
@@ -80,20 +85,29 @@ fn format_size(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
 }
 
-fn config_to_trainer_item(state: &AppState, cfg: &TrainerConfig) -> TrainerItem {
+fn config_to_trainer_item(
+    state: &AppState,
+    cfg: &TrainerConfig,
+    exe_path: Option<&std::path::Path>,
+) -> TrainerItem {
     let cheats: Vec<CheatEntry> = cfg
         .default_cheats
         .iter()
         .map(|key| make_cheat(state, "", key))
         .collect();
+    let icon = exe_path.and_then(exe_icon::extract_icon);
+    let size = format_size(cfg.size_bytes);
     make_trainer(
         state,
-        &cfg.name,
-        &cfg.version,
-        &format_size(cfg.size_bytes),
-        &cfg.filename,
-        cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
-        cheats,
+        NewTrainer {
+            name: &cfg.name,
+            version: &cfg.version,
+            size: &size,
+            exe: &cfg.filename,
+            shortcut: cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
+            cheats,
+            icon,
+        },
     )
 }
 
@@ -101,7 +115,13 @@ fn trainer_items_from_config(state: &AppState, config: &AppConfig) -> Vec<Traine
     config
         .trainers
         .iter()
-        .map(|cfg| config_to_trainer_item(state, cfg))
+        .map(|cfg| {
+            let exe_path = config
+                .trainer_folder
+                .as_ref()
+                .map(|f| f.join(&cfg.filename));
+            config_to_trainer_item(state, cfg, exe_path.as_deref())
+        })
         .collect()
 }
 
@@ -160,6 +180,39 @@ fn find_trainer(state: &AppState, id: i32) -> Option<TrainerItem> {
     state.trainers.borrow().iter().find(|t| t.id == id).cloned()
 }
 
+/// Applies a virtual-keyboard edit (insert/backspace) to whichever field
+/// `keyboard_target` names ("search" | "name" | "cheat"), then mirrors the
+/// result back into `keyboard_preview` so the popup's own display stays in
+/// sync. The actual string mutation happens here in Rust rather than in
+/// Slint, since Slint's imperative string API has no substring/pop support.
+fn apply_keyboard_edit(app: &AppWindow, state: &AppState, edit: impl FnOnce(&mut String)) {
+    let mut text = app.get_keyboard_preview().to_string();
+    edit(&mut text);
+    app.set_keyboard_preview(text.clone().into());
+
+    match app.get_keyboard_target().as_str() {
+        "search" => {
+            app.set_search_query(text.into());
+            refresh_trainer_list(app, state);
+        }
+        "name" => app.set_form_name(text.into()),
+        "cheat" => {
+            let id = app.get_keyboard_cheat_id();
+            let cheats: Vec<CheatEntry> = cheats_to_vec(&app.get_form_cheats())
+                .into_iter()
+                .map(|mut c| {
+                    if c.id == id {
+                        c.label = text.clone().into();
+                    }
+                    c
+                })
+                .collect();
+            app.set_form_cheats(ModelRc::new(VecModel::from(cheats)));
+        }
+        _ => {}
+    }
+}
+
 fn show_toast(app: &AppWindow, message: impl Into<SharedString>) {
     app.set_toast_message(message.into());
     app.set_show_toast(true);
@@ -174,6 +227,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
+    app.set_form_focused_index(-1);
+    app.set_form_sub_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -186,6 +241,8 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
+    app.set_form_focused_index(-1);
+    app.set_form_sub_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -216,6 +273,10 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     app.set_folder_path(folder_label.into());
     app.set_default_shortcut_label("Ctrl + F12".into());
 
+    app.on_quit_app(|| {
+        let _ = slint::quit_event_loop();
+    });
+
     {
         let app_weak = app.as_weak();
         let state = state.clone();
@@ -230,13 +291,20 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         let state = state.clone();
         app.on_launch_trainer(move |id| {
             let app = app_weak.unwrap();
-            if let Some(trainer) = find_trainer(&state, id) {
-                let suffix = if app.get_close_after_launch() {
-                    " (app would close)"
-                } else {
-                    ""
-                };
-                show_toast(&app, format!("Launching {}…{}", trainer.name, suffix));
+            let Some(trainer) = find_trainer(&state, id) else {
+                return;
+            };
+            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                show_toast(&app, "No trainer folder selected");
+                return;
+            };
+
+            match trainer::launch_trainer(&folder, &trainer.exe) {
+                Ok(()) if app.get_close_after_launch() => {
+                    let _ = slint::quit_event_loop();
+                }
+                Ok(()) => show_toast(&app, format!("Launched {}", trainer.name)),
+                Err(err) => show_toast(&app, format!("Failed to launch {}: {err}", trainer.name)),
             }
         });
     }
@@ -337,7 +405,18 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             let editing_id = app.get_editing_id();
 
             if editing_id < 0 {
-                let trainer = make_trainer(&state, &name, "1.0.0", "— MB", &exe, &shortcut, cheats);
+                let trainer = make_trainer(
+                    &state,
+                    NewTrainer {
+                        name: &name,
+                        version: "1.0.0",
+                        size: "— MB",
+                        exe: &exe,
+                        shortcut: &shortcut,
+                        cheats,
+                        icon: None,
+                    },
+                );
                 state.trainers.borrow_mut().push(trainer);
                 show_toast(&app, "Trainer added");
             } else {
@@ -360,6 +439,8 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             }
 
             app.set_show_add_edit(false);
+            app.set_form_focused_index(-1);
+            app.set_form_sub_index(0);
             refresh_trainer_list(&app, &state);
         });
     }
@@ -454,6 +535,26 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 app.set_form_exe_display("NewGame.exe".into());
             }
             show_toast(&app, "Executable picker would open here");
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_keyboard_char(move |ch| {
+            let app = app_weak.unwrap();
+            apply_keyboard_edit(&app, &state, |s| s.push_str(ch.as_str()));
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_keyboard_backspace(move || {
+            let app = app_weak.unwrap();
+            apply_keyboard_edit(&app, &state, |s| {
+                s.pop();
+            });
         });
     }
 }

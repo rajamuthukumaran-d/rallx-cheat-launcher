@@ -9,6 +9,9 @@ export component TextField inherits Rectangle {
     in property <length> field-font-size: 16px;
     in property <length> pad-h: 14px;
     in property <bool> read-only: false;
+    // Gamepad-focus indicator: tints the placeholder/typed text instead of
+    // drawing a focus ring around the field.
+    in property <bool> highlighted: false;
     callback edited();
     callback accepted();
 
@@ -24,7 +27,7 @@ export component TextField inherits Rectangle {
         height: 100%;
         vertical-alignment: center;
         text: root.placeholder;
-        color: Theme.text-dim;
+        color: root.highlighted ? Theme.accent : Theme.text-dim;
         font-size: field-font-size;
         visible: root.text.is-empty;
     }
@@ -36,7 +39,7 @@ export component TextField inherits Rectangle {
         vertical-alignment: center;
         single-line: true;
         text <=> root.text;
-        color: Theme.text;
+        color: root.highlighted ? Theme.accent : Theme.text;
         font-size: field-font-size;
         read-only: root.read-only;
         edited => { root.edited(); }

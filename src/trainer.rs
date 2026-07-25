@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::config::TrainerConfig;
+use crate::exe_version;
 
 #[derive(Debug, Clone)]
 pub struct TrainerInfo {
@@ -57,15 +58,21 @@ pub fn sync_trainer_configs(
     let mut result = Vec::with_capacity(discovered.len());
 
     for info in discovered {
+        // Version is read straight off the exe, same as size - never
+        // user-editable, so it's refreshed every sync rather than preserved.
+        let version =
+            exe_version::extract_version(&folder.join(&info.filename)).unwrap_or_default();
+
         if let Some(found) = existing.iter().find(|t| t.filename == info.filename) {
             let mut cfg = found.clone();
             cfg.size_bytes = info.size_bytes;
+            cfg.version = version;
             result.push(cfg);
         } else {
             result.push(TrainerConfig {
                 name: stem(&info.filename),
                 filename: info.filename,
-                version: String::new(),
+                version,
                 size_bytes: info.size_bytes,
                 game_exe: None,
                 launch_shortcut: None,
@@ -125,7 +132,10 @@ mod tests {
 
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].name, "My Trainer");
-        assert_eq!(synced[0].version, "1.2.3");
+        // Version is re-read from the exe on every sync rather than kept
+        // from config - the fixture file has no version resource, so it
+        // comes back empty rather than the stale "1.2.3".
+        assert_eq!(synced[0].version, "");
         assert_eq!(synced[0].size_bytes, 4);
         assert_eq!(synced[0].launch_shortcut.as_deref(), Some("Ctrl+F1"));
     }

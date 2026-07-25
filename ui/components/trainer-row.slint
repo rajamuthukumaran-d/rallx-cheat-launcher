@@ -11,6 +11,7 @@ export component TrainerRow inherits Rectangle {
     callback edit();
     callback delete();
     callback copy();
+    callback select();
 
     // ListView only permits a single `for` as its direct child, so row-to-row
     // spacing can't come from a wrapping layout's `spacing` - instead each row
@@ -28,6 +29,16 @@ export component TrainerRow inherits Rectangle {
 
         animate background, border-color { duration: 100ms; }
 
+        row-touch := TouchArea {
+            x: 0;
+            width: 100%;
+            height: 100%;
+            clicked => {
+                root.select();
+                root.launch();
+            }
+        }
+
         HorizontalLayout {
             padding-left: Theme.row-padding-h;
             padding-right: Theme.row-padding-h;
@@ -40,15 +51,25 @@ export component TrainerRow inherits Rectangle {
                 width: Theme.row-icon-size;
                 height: Theme.row-icon-size;
                 border-radius: 9px;
-                background: trainer.color;
+                background: trainer.has-icon ? transparent : trainer.color;
+                clip: true;
 
-                Text {
+                if !trainer.has-icon: Text {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     text: trainer.letter;
                     color: Theme.on-accent;
                     font-size: 18px;
                     font-weight: 700;
+                }
+
+                if trainer.has-icon: Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: trainer.icon;
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: contain;
                 }
             }
 
@@ -68,11 +89,9 @@ export component TrainerRow inherits Rectangle {
                     spacing: 10px;
                     alignment: start;
 
-                    Text { text: "v" + trainer.version; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
                     Text { text: trainer.size; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
-                    Text { text: trainer.exe; color: Theme.text-dim; font-size: 13px; }
+                    if trainer.version != "": Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
+                    if trainer.version != "": Text { text: "v" + trainer.version; color: Theme.text-dim; font-size: 13px; }
                 }
             }
 

@@ -2,6 +2,8 @@ slint::include_modules!();
 
 mod app_state;
 mod config;
+mod exe_icon;
+mod exe_version;
 mod gamepad;
 mod hotkey;
 mod trainer;
@@ -47,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut config, folder_path) = config::load_config();
     config.trainer_folder = folder_path;
     app_state::wire(&app, config);
+    gamepad::spawn_listener(app.as_weak());
 
     app.run()?;
     Ok(())
