@@ -45,6 +45,10 @@ export component AppWindow inherits Window {
     // screen's header row (Search/Refresh/Edit/Add/Settings).
     in-out property <bool> home-header-focused: false;
     in-out property <int> home-header-index: 0;
+    // True when the trainer list is empty and gamepad/keyboard focus is on
+    // the single action button shown in its place ("Add trainer" or, when a
+    // search is filtering everything out, "Clear search").
+    in-out property <bool> empty-action-focused: false;
     in-out property <int> settings-focused-index: -1;
 
     in-out property <[TrainerItem]> visible-trainers: [];
@@ -261,14 +265,24 @@ export component AppWindow inherits Window {
             root.move-settings-selection(delta);
             return;
         }
-        // Home screen: header <-> trainer list. Up from the first row (or
-        // from an empty list) moves into the header; Down from the header
-        // returns to wherever the list was left focused, while Up from the
-        // header wraps to the last row.
+        // Home screen: header <-> trainer list <-> (when the list is empty)
+        // the single empty-state action button. Up from the first row moves
+        // into the header; Down from the header returns to wherever the list
+        // was left focused, while Up from the header wraps to the last row.
+        // With an empty list, Down from the header (or from nowhere yet)
+        // lands on the action button instead, and Up from it goes back.
+        if root.empty-action-focused && root.visible-trainers.length > 0 {
+            // The list was repopulated (e.g. a query typed on a real
+            // keyboard now matches something) while focus was stuck on the
+            // now-hidden action button - drop back to normal list nav.
+            root.empty-action-focused = false;
+        }
         if root.home-header-focused {
             if delta > 0 {
                 root.home-header-focused = false;
-                if root.focused-index < 0 {
+                if root.visible-trainers.length == 0 {
+                    root.empty-action-focused = true;
+                } else if root.focused-index < 0 {
                     root.focused-index = 0;
                 }
             } else if delta < 0 && root.visible-trainers.length > 0 {
@@ -277,11 +291,23 @@ export component AppWindow inherits Window {
             }
             return;
         }
-        if delta < 0 && (root.visible-trainers.length == 0 || root.focused-index <= 0) {
-            root.home-header-focused = true;
+        if root.empty-action-focused {
+            if delta < 0 {
+                root.empty-action-focused = false;
+                root.home-header-focused = true;
+            }
             return;
         }
         if root.visible-trainers.length == 0 {
+            if delta > 0 {
+                root.empty-action-focused = true;
+            } else {
+                root.home-header-focused = true;
+            }
+            return;
+        }
+        if delta < 0 && root.focused-index <= 0 {
+            root.home-header-focused = true;
             return;
         }
         if root.focused-index < 0 {
@@ -365,6 +391,18 @@ export component AppWindow inherits Window {
     // reopen the keyboard while e.g. a trainer row is focused instead.
     function search-focused() -> bool {
         return root.home-header-focused && root.home-header-index == 0;
+    }
+
+    // A on the empty-state action button: "Add trainer" normally, or - when
+    // a query is what's filtering the list down to nothing - clears and
+    // closes the search box entirely, same as the header's close icon.
+    function activate-empty-action() {
+        if root.search-query.is-empty {
+            root.open-add();
+        } else {
+            root.toggle-search();
+            root.empty-action-focused = false;
+        }
     }
 
     public function open-settings-view() {
@@ -595,6 +633,8 @@ export component AppWindow inherits Window {
             root.activate-settings-focused();
         } else if root.home-header-focused {
             root.activate-home-header();
+        } else if root.empty-action-focused && root.visible-trainers.length == 0 {
+            root.activate-empty-action();
         } else {
             root.launch-focused-trainer();
         }
@@ -660,6 +700,7 @@ export component AppWindow inherits Window {
         focused-index <=> root.focused-index;
         header-focused: root.home-header-focused;
         header-index: root.home-header-index;
+        empty-action-focused: root.empty-action-focused;
         visible-trainers: root.visible-trainers;
         trainer-count: root.trainer-count;
         total-size-label: root.total-size-label;

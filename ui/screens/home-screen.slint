@@ -15,6 +15,9 @@ export component HomeScreen inherits Rectangle {
     // button; driven by AppWindow's move-selection/move-horizontal.
     in property <bool> header-focused: false;
     in property <int> header-index: 0;
+    // Gamepad/keyboard focus on the empty-state action button ("Add
+    // trainer" or "Clear search") when the trainer list is empty.
+    in property <bool> empty-action-focused: false;
 
     in property <[TrainerItem]> visible-trainers;
     in property <int> trainer-count;
@@ -218,7 +221,7 @@ export component HomeScreen inherits Rectangle {
             Rectangle {
                 vertical-stretch: 1;
 
-                if visible-trainers.length == 0: VerticalLayout {
+                if visible-trainers.length == 0 && root.search-query.is-empty: VerticalLayout {
                     alignment: center;
                     cross-axis-alignment: center;
                     spacing: 18px;
@@ -287,7 +290,80 @@ export component HomeScreen inherits Rectangle {
                                 text: "Add trainer";
                                 color: Theme.on-accent;
                                 font-size: 16px;
-                                font-weight: 600;
+                                font-weight: root.empty-action-focused ? 800 : 600;
+                            }
+                        }
+                    }
+                }
+
+                if visible-trainers.length == 0 && !root.search-query.is-empty: VerticalLayout {
+                    alignment: center;
+                    cross-axis-alignment: center;
+                    spacing: 18px;
+
+                    Rectangle {
+                        width: 88px;
+                        height: 88px;
+                        border-radius: 16px;
+                        background: Theme.panel2;
+                        border-width: 1.5px;
+                        border-color: Theme.border;
+
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../../assets/images/icons/search.svg");
+                            width: 36px;
+                            height: 36px;
+                            colorize: Theme.text-dim;
+                        }
+                    }
+
+                    Text {
+                        text: "No trainers found";
+                        color: Theme.text;
+                        font-size: 22px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        width: 340px;
+                        text: "No trainers match \"" + root.search-query + "\".";
+                        color: Theme.text-dim;
+                        font-size: 15px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+
+                    Rectangle {
+                        background: Theme.panel2;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        border-radius: 8px;
+                        width: clear-btn-layout.min-width;
+                        height: clear-btn-layout.min-height;
+
+                        clear-touch := TouchArea {
+                            clicked => {
+                                root.show-search = false;
+                                root.search-query = "";
+                                root.search-changed("");
+                            }
+                        }
+
+                        clear-btn-layout := HorizontalLayout {
+                            padding-left: 22px;
+                            padding-right: 22px;
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+
+                            Text {
+                                text: "Clear search";
+                                color: root.empty-action-focused ? Theme.accent : Theme.text;
+                                font-size: 16px;
+                                font-weight: root.empty-action-focused ? 800 : 600;
                             }
                         }
                     }
