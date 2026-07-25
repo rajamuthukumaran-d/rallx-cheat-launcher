@@ -240,6 +240,10 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     app.set_folder_path(folder_label.into());
     app.set_default_shortcut_label("Ctrl + F12".into());
 
+    app.on_quit_app(|| {
+        let _ = slint::quit_event_loop();
+    });
+
     {
         let app_weak = app.as_weak();
         let state = state.clone();

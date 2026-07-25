@@ -411,6 +411,8 @@ export component AppWindow inherits Window {
         }
     }
 
+    // B: closes whichever popup is on top, backs out of Settings, or - with
+    // nothing left to back out of - closes the app from Home.
     public function gamepad-cancel() {
         if root.recording {
             root.cancel-recording();
@@ -420,9 +422,12 @@ export component AppWindow inherits Window {
             root.delete-confirm-id = -1;
         } else if root.view == AppView.settings {
             root.go-home();
+        } else {
+            root.quit-app();
         }
     }
 
+    callback quit-app();
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
