@@ -150,8 +150,10 @@ fn rescan_trainer_folder(state: &AppState) -> Vec<TrainerItem> {
 
     if let Ok(trainers) = trainer::sync_trainer_configs(&config.trainers, &folder) {
         config.trainers = trainers;
-        let _ = crate::config::save_config(&config);
     }
+    // Saved even when the scan failed: config.json is the only record of which
+    // folder was picked, so a newly chosen one must survive an unreadable dir.
+    let _ = crate::config::save_config(&config);
 
     trainer_items_from_config(state, &config)
 }

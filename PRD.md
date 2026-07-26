@@ -60,4 +60,5 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Tech stack
 - Rust with slint
-- Store configs inside config.json file inside the selected trainer folder
+- Store configs inside config.json file next to the app executable (the
+  selected trainer folder is one of the values stored in it)

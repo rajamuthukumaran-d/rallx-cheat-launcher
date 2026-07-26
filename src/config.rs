@@ -3,7 +3,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeConfig {
@@ -80,56 +80,30 @@ impl Default for AppConfig {
     }
 }
 
-pub fn get_bootstrap_path() -> PathBuf {
-    // Store last_folder.txt next to the executable (portable behavior)
+/// config.json lives next to the executable, so the app is self-contained and
+/// needs nothing on disk to find its own settings - the trainer folder is just
+/// one more value inside it.
+pub fn get_config_path() -> PathBuf {
     if let Ok(mut exe_path) = std::env::current_exe() {
         exe_path.pop();
-        exe_path.join("last_folder.txt")
+        exe_path.join("config.json")
     } else {
-        PathBuf::from("last_folder.txt")
+        PathBuf::from("config.json")
     }
 }
 
-pub fn get_config_path(folder: &Path) -> PathBuf {
-    folder.join("config.json")
-}
-
-pub fn load_config() -> (AppConfig, Option<PathBuf>) {
-    let bootstrap = get_bootstrap_path();
-    let folder_path = if bootstrap.exists() {
-        fs::read_to_string(&bootstrap)
-            .ok()
-            .map(|s| PathBuf::from(s.trim()))
-    } else {
-        None
-    };
-
-    if let Some(ref folder) = folder_path {
-        let config_path = get_config_path(folder);
-        if config_path.exists() {
-            if let Ok(content) = fs::read_to_string(&config_path) {
-                if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
-                    return (config, Some(folder.clone()));
-                }
-            }
+pub fn load_config() -> AppConfig {
+    let config_path = get_config_path();
+    if let Ok(content) = fs::read_to_string(&config_path) {
+        if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+            return config;
         }
     }
 
-    // Default configuration if nothing is loaded
-    (AppConfig::default(), folder_path)
+    AppConfig::default()
 }
 
 pub fn save_config(config: &AppConfig) -> Result<(), std::io::Error> {
-    if let Some(ref folder) = config.trainer_folder {
-        // Save the folder path to bootstrap file
-        let bootstrap = get_bootstrap_path();
-        fs::write(&bootstrap, folder.to_string_lossy().as_ref())?;
-
-        // Ensure folder exists and save config.json inside it
-        fs::create_dir_all(folder)?;
-        let config_path = get_config_path(folder);
-        let content = serde_json::to_string_pretty(config)?;
-        fs::write(config_path, content)?;
-    }
-    Ok(())
+    let content = serde_json::to_string_pretty(config)?;
+    fs::write(get_config_path(), content)
 }
