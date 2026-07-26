@@ -70,8 +70,12 @@ export component AppWindow inherits Window {
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
     in-out property <[CheatEntry]> form-cheats: [];
+    // Absolute path of the exe picked in the Add-trainer form, kept alongside
+    // form-exe-display (filename only) because the file still has to be moved
+    // into the trainer folder on save. Empty when nothing is picked.
+    in-out property <string> form-exe-path: "";
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
-    // 1 Game executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
+    // 1 Trainer executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
     // then Cancel/Save last. Keep in sync with form-item-count()/
     // activate-form-focused() below and AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
@@ -172,10 +176,17 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Name, Game executable, Shortcut, Add cheat, one stop per cheat row,
+    // Name, Trainer executable, Shortcut, Add cheat, one stop per cheat row,
     // Cancel/Save.
     function form-item-count() -> int {
         return 5 + root.form-cheats.length;
+    }
+
+    // The trainer-executable row (index 1) is only rendered when adding, so
+    // editing keeps every other index the same and steps over that one stop
+    // instead of renumbering the whole form.
+    function form-exe-field-visible() -> bool {
+        return root.editing-id < 0;
     }
 
     function move-form-selection(delta: int) {
@@ -183,6 +194,9 @@ export component AppWindow inherits Window {
             root.form-focused-index = 0;
         } else {
             root.form-focused-index = max(0, min(root.form-focused-index + delta, root.form-item-count() - 1));
+        }
+        if root.form-focused-index == 1 && !root.form-exe-field-visible() {
+            root.form-focused-index = delta < 0 ? 0 : 2;
         }
         root.form-sub-index = 0;
     }
@@ -558,7 +572,9 @@ export component AppWindow inherits Window {
                 root.open-keyboard("name", -1, root.form-name);
             }
         } else if root.form-focused-index == 1 {
-            root.browse-exe();
+            if root.form-exe-field-visible() {
+                root.browse-exe();
+            }
         } else if root.form-focused-index == 2 {
             root.start-shortcut-recording();
         } else if root.form-focused-index == 3 {
@@ -814,6 +830,7 @@ export component AppWindow inherits Window {
             form-exe-display: root.form-exe-display;
             form-shortcut-display: root.form-shortcut-display;
             cheats: root.form-cheats;
+            show-exe-field: root.form-exe-field-visible();
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 

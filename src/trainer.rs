@@ -1,9 +1,97 @@
 #![allow(dead_code)]
 
+use std::fmt;
 use std::path::Path;
 
 use crate::config::TrainerConfig;
 use crate::exe_version;
+
+#[derive(Debug)]
+pub enum ImportError {
+    NotAnExe,
+    AlreadyInFolder,
+    DestinationExists(String),
+    Io(std::io::Error),
+}
+
+impl fmt::Display for ImportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAnExe => write!(f, "Only .exe files can be added as trainers"),
+            Self::AlreadyInFolder => {
+                write!(f, "That executable is already in the trainer folder")
+            }
+            Self::DestinationExists(name) => {
+                write!(f, "{name} already exists in the trainer folder")
+            }
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for ImportError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+fn is_exe(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+}
+
+/// Same directory check that tolerates `.`/`..`/casing/short-path differences
+/// by comparing canonicalized paths, falling back to a plain compare when
+/// either path can't be canonicalized (e.g. it no longer exists).
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// Validates a user-picked executable against the configured trainer folder
+/// *before* anything is moved, so the Add-trainer form can reject the choice
+/// while it's still cancellable.
+pub fn validate_import(src: &Path, folder: &Path) -> Result<String, ImportError> {
+    if !is_exe(src) {
+        return Err(ImportError::NotAnExe);
+    }
+
+    let filename = src
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or(ImportError::NotAnExe)?
+        .to_string();
+
+    if let Some(parent) = src.parent() {
+        if same_folder(parent, folder) {
+            return Err(ImportError::AlreadyInFolder);
+        }
+    }
+
+    if folder.join(&filename).exists() {
+        return Err(ImportError::DestinationExists(filename));
+    }
+
+    Ok(filename)
+}
+
+/// Moves a validated executable into the trainer folder and returns its
+/// filename. Falls back to copy+delete because `fs::rename` fails when the
+/// source sits on a different volume than the trainer folder.
+pub fn import_trainer(src: &Path, folder: &Path) -> Result<String, ImportError> {
+    let filename = validate_import(src, folder)?;
+    std::fs::create_dir_all(folder)?;
+    let dest = folder.join(&filename);
+
+    if std::fs::rename(src, &dest).is_err() {
+        std::fs::copy(src, &dest)?;
+        std::fs::remove_file(src)?;
+    }
+
+    Ok(filename)
+}
 
 #[derive(Debug, Clone)]
 pub struct TrainerInfo {
@@ -122,7 +210,10 @@ mod tests {
             size_bytes: 0,
             game_exe: Some("Game.exe".to_string()),
             launch_shortcut: Some("Ctrl+F1".to_string()),
-            default_cheats: vec!["Numpad1".to_string()],
+            default_cheats: vec![crate::config::CheatConfig {
+                label: "Infinite Health".to_string(),
+                key: "Numpad1".to_string(),
+            }],
             close_after_launch: true,
         }];
 
@@ -164,5 +255,74 @@ mod tests {
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].filename, "new-trainer.exe");
         assert_eq!(synced[0].name, "new-trainer");
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "rallx-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn validate_import_rejects_exe_already_in_trainer_folder() {
+        let folder = scratch("import-same");
+        write_exe(&folder, "trainer.exe", b"abc");
+
+        let err = validate_import(&folder.join("trainer.exe"), &folder).unwrap_err();
+
+        std::fs::remove_dir_all(&folder).unwrap();
+
+        assert!(matches!(err, ImportError::AlreadyInFolder));
+    }
+
+    #[test]
+    fn validate_import_rejects_non_exe() {
+        let folder = scratch("import-ext");
+        let src = scratch("import-ext-src");
+        std::fs::write(src.join("notes.txt"), b"abc").unwrap();
+
+        let err = validate_import(&src.join("notes.txt"), &folder).unwrap_err();
+
+        std::fs::remove_dir_all(&folder).unwrap();
+        std::fs::remove_dir_all(&src).unwrap();
+
+        assert!(matches!(err, ImportError::NotAnExe));
+    }
+
+    #[test]
+    fn validate_import_rejects_duplicate_filename() {
+        let folder = scratch("import-dup");
+        let src = scratch("import-dup-src");
+        write_exe(&folder, "trainer.exe", b"abc");
+        write_exe(&src, "trainer.exe", b"def");
+
+        let err = validate_import(&src.join("trainer.exe"), &folder).unwrap_err();
+
+        std::fs::remove_dir_all(&folder).unwrap();
+        std::fs::remove_dir_all(&src).unwrap();
+
+        assert!(matches!(err, ImportError::DestinationExists(name) if name == "trainer.exe"));
+    }
+
+    #[test]
+    fn import_trainer_moves_exe_into_folder() {
+        let folder = scratch("import-move");
+        let src = scratch("import-move-src");
+        write_exe(&src, "trainer.exe", b"abcd");
+
+        let filename = import_trainer(&src.join("trainer.exe"), &folder).unwrap();
+        let moved = folder.join("trainer.exe").exists();
+        let source_gone = !src.join("trainer.exe").exists();
+
+        std::fs::remove_dir_all(&folder).unwrap();
+        std::fs::remove_dir_all(&src).unwrap();
+
+        assert_eq!(filename, "trainer.exe");
+        assert!(moved);
+        assert!(source_gone);
     }
 }

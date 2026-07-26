@@ -64,7 +64,12 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     in property <string> form-exe-display: "No executable selected";
     in property <string> form-shortcut-display: "Click to record shortcut";
     in property <[CheatEntry]> cheats;
-    // Gamepad focus target spanning the whole form: 0 Name, 1 Game
+    // The trainer executable is only pickable when adding - an existing
+    // trainer's exe is the file it was imported as, so editing hides the
+    // field rather than offering a swap. Focus indices below stay unchanged
+    // either way; AppWindow's move-form-selection skips index 1 when hidden.
+    in property <bool> show-exe-field: true;
+    // Gamepad focus target spanning the whole form: 0 Name, 1 Trainer
     // executable, 2 Shortcut, 3 Add cheat, one stop per cheat row, then the
     // Cancel/Save row last. -1 means nothing focused. Driven by AppWindow's
     // move-form-selection/activate-form-focused via D-Pad up/down and A.
@@ -160,11 +165,11 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         }
                     }
 
-                    VerticalLayout {
+                    if root.show-exe-field: VerticalLayout {
                         vertical-stretch: 0;
                         spacing: 6px;
                         FieldLabel {
-                            text: "Game executable";
+                            text: "Trainer executable";
                             color: root.focused-index == 1 ? Theme.accent : Theme.text-dim;
                             font-weight: root.focused-index == 1 ? 700 : 600;
                         }

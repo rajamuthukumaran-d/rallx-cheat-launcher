@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +12,37 @@ pub struct ThemeConfig {
     pub style: String,
 }
 
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct CheatConfig {
+    pub label: String,
+    pub key: String,
+}
+
+// Earlier configs stored default cheats as bare key strings; those are still
+// accepted and read back with an empty label.
+impl<'de> Deserialize<'de> for CheatConfig {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Key(String),
+            Labeled {
+                #[serde(default)]
+                label: String,
+                key: String,
+            },
+        }
+
+        Ok(match Raw::deserialize(deserializer)? {
+            Raw::Key(key) => CheatConfig {
+                label: String::new(),
+                key,
+            },
+            Raw::Labeled { label, key } => CheatConfig { label, key },
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TrainerConfig {
     pub name: String,
@@ -20,7 +51,7 @@ pub struct TrainerConfig {
     pub size_bytes: u64,
     pub game_exe: Option<String>,
     pub launch_shortcut: Option<String>,
-    pub default_cheats: Vec<String>,
+    pub default_cheats: Vec<CheatConfig>,
     pub close_after_launch: bool,
 }
 
