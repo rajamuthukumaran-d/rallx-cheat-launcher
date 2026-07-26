@@ -418,10 +418,31 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         let state = state.clone();
         app.on_confirm_delete(move |id| {
             let app = app_weak.unwrap();
-            state.trainers.borrow_mut().retain(|t| t.id != id);
             app.set_delete_confirm_id(-1);
+
+            let Some(item) = find_trainer(&state, id) else {
+                return;
+            };
+            let folder = state.config.borrow().trainer_folder.clone();
+
+            if let Some(folder) = folder {
+                if let Err(err) = trainer::delete_trainer_file(&folder, &item.exe) {
+                    show_toast(&app, format!("Failed to delete {}: {err}", item.exe));
+                    return;
+                }
+                {
+                    let mut config = state.config.borrow_mut();
+                    config.trainers.retain(|t| t.filename != item.exe.as_str());
+                    let _ = crate::config::save_config(&config);
+                }
+                let items = rescan_trainer_folder(&state);
+                *state.trainers.borrow_mut() = items;
+            } else {
+                state.trainers.borrow_mut().retain(|t| t.id != id);
+            }
+
             refresh_trainer_list(&app, &state);
-            show_toast(&app, "Trainer deleted");
+            show_toast(&app, format!("Deleted {}", item.name));
         });
     }
 

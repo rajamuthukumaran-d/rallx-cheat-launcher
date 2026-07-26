@@ -127,6 +127,16 @@ pub fn launch_trainer(folder: &Path, filename: &str) -> Result<(), std::io::Erro
     Ok(())
 }
 
+/// Deletes a trainer's executable from the trainer folder. A file that has
+/// already vanished counts as success - the caller only needs it gone, and its
+/// config entry still has to be dropped either way.
+pub fn delete_trainer_file(folder: &Path, filename: &str) -> Result<(), std::io::Error> {
+    match std::fs::remove_file(folder.join(filename)) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
 fn stem(filename: &str) -> String {
     Path::new(filename)
         .file_stem()
@@ -306,6 +316,21 @@ mod tests {
         std::fs::remove_dir_all(&src).unwrap();
 
         assert!(matches!(err, ImportError::DestinationExists(name) if name == "trainer.exe"));
+    }
+
+    #[test]
+    fn delete_trainer_file_removes_exe_and_tolerates_a_missing_one() {
+        let folder = scratch("delete");
+        write_exe(&folder, "trainer.exe", b"abc");
+
+        delete_trainer_file(&folder, "trainer.exe").unwrap();
+        let gone = !folder.join("trainer.exe").exists();
+        let second = delete_trainer_file(&folder, "trainer.exe");
+
+        std::fs::remove_dir_all(&folder).unwrap();
+
+        assert!(gone);
+        assert!(second.is_ok());
     }
 
     #[test]
