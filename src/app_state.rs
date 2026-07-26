@@ -332,11 +332,13 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     *state.trainers.borrow_mut() = items;
     refresh_trainer_list(app, &state);
 
-    let folder_label = match state.config.borrow().trainer_folder.clone() {
-        Some(folder) => folder.display().to_string(),
+    let trainer_folder = state.config.borrow().trainer_folder.clone();
+    let folder_label = match trainer_folder {
+        Some(ref folder) => folder.display().to_string(),
         None => "No folder selected".to_string(),
     };
     app.set_folder_path(folder_label.into());
+    app.set_has_trainer_folder(trainer_folder.is_some());
     app.set_default_shortcut_label("Ctrl + F12".into());
 
     app.on_quit_app(|| {
@@ -607,6 +609,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             refresh_trainer_list(&app, &state);
 
             app.set_folder_path(folder.display().to_string().into());
+            app.set_has_trainer_folder(true);
             show_toast(&app, "Trainer folder updated");
         });
     }

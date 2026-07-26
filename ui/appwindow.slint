@@ -56,6 +56,11 @@ export component AppWindow inherits Window {
     in-out property <string> total-size-label: "0.0 MB";
 
     in-out property <string> folder-path: "No folder selected";
+    // Gates everything that needs somewhere to put a trainer: the home
+    // screen's empty state asks for the folder instead of offering "Add
+    // trainer", and A/+ on Add routes to the folder picker. Kept in sync with
+    // config.trainer_folder by app_state.
+    in-out property <bool> has-trainer-folder: false;
     in-out property <string> default-shortcut-label: "Not set";
 
     in-out property <int> delete-confirm-id: -1;
@@ -409,12 +414,24 @@ export component AppWindow inherits Window {
         return root.home-header-focused && root.home-header-index == 0;
     }
 
-    // A on the empty-state action button: "Add trainer" normally, or - when
-    // a query is what's filtering the list down to nothing - clears and
-    // closes the search box entirely, same as the header's close icon.
+    // Every "add a trainer" entry point funnels through here: adding imports
+    // the picked exe into the trainer folder, so with no folder set there's
+    // nowhere to put it and the folder picker has to come first.
+    function request-add() {
+        if root.has-trainer-folder {
+            root.open-add();
+        } else {
+            root.browse-folder();
+        }
+    }
+
+    // A on the empty-state action button: the folder picker while no trainer
+    // folder is set, "Add trainer" once one is, or - when a query is what's
+    // filtering the list down to nothing - clears and closes the search box
+    // entirely, same as the header's close icon.
     function activate-empty-action() {
         if root.search-query.is-empty {
-            root.open-add();
+            root.request-add();
         } else {
             root.toggle-search();
             root.empty-action-focused = false;
@@ -508,7 +525,7 @@ export component AppWindow inherits Window {
         } else if root.home-header-index == 2 {
             root.edit-mode = !root.edit-mode;
         } else if root.home-header-index == 3 {
-            root.open-add();
+            root.request-add();
         } else if root.home-header-index == 4 {
             root.open-settings-view();
         }
@@ -782,11 +799,13 @@ export component AppWindow inherits Window {
             header-focused: root.home-header-focused;
             header-index: root.home-header-index;
             empty-action-focused: root.empty-action-focused;
+            has-trainer-folder: root.has-trainer-folder;
             visible-trainers: root.visible-trainers;
             trainer-count: root.trainer-count;
             total-size-label: root.total-size-label;
 
-            open-add => { root.open-add(); }
+            open-add => { root.request-add(); }
+            select-folder => { root.browse-folder(); }
             open-settings => { root.open-settings-view(); }
             refresh => { root.refresh-trainers(); }
             launch-trainer(id) => { root.launch-trainer(id); }
