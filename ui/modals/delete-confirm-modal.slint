@@ -42,11 +42,13 @@ export component DeleteConfirmModal inherits ModalBackdrop {
             Rectangle { height: 16px; }
 
             Text {
+                width: 320px;
                 text: "Delete \"\{root.trainer-name}\"?";
                 font-size: 18px;
                 font-weight: 700;
                 color: Theme.text;
                 horizontal-alignment: center;
+                wrap: word-wrap;
             }
 
             Rectangle { height: 8px; }
