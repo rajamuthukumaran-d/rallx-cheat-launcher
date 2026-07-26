@@ -13,7 +13,7 @@ use std::rc::Rc;
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 use crate::config::{AppConfig, CheatConfig, TrainerConfig};
-use crate::{exe_icon, trainer, AppWindow, CheatEntry, TrainerItem};
+use crate::{exe_icon, trainer, AppWindow, CheatEntry, Palette, Theme, TrainerItem};
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
 // save path treats as "nothing configured" when writing config.json.
@@ -312,6 +312,59 @@ fn apply_form_to_config(
     let _ = crate::config::save_config(&config);
 }
 
+/// Resolves a stored accent to one of `Palette.accents`, falling back to the
+/// first swatch. Settings only ever offers those five, so a value from an older
+/// config that isn't among them would otherwise leave no swatch marked selected.
+fn palette_accent(app: &AppWindow, (r, g, b): (u8, u8, u8)) -> Color {
+    let accents = app.global::<Palette>().get_accents();
+    accents
+        .iter()
+        .find(|c| (c.red(), c.green(), c.blue()) == (r, g, b))
+        .or_else(|| accents.iter().next())
+        .unwrap_or(Color::from_rgb_u8(r, g, b))
+}
+
+/// Pushes the persisted settings into the UI: the plain window properties plus
+/// the Slint `Theme` global the whole UI renders from.
+fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
+    app.set_close_after_launch(config.close_after_launch_global);
+    app.set_confirm_exit(config.confirm_exit);
+    app.set_default_shortcut_label(
+        config
+            .default_shortcut
+            .as_deref()
+            .unwrap_or(NOT_SET)
+            .to_string()
+            .into(),
+    );
+
+    let theme = app.global::<Theme>();
+    theme.set_accent(palette_accent(app, config.theme.accent_rgb()));
+    theme.set_dark(config.theme.is_dark());
+    theme.set_compact(config.theme.is_compact());
+}
+
+/// The reverse of `apply_settings_to_ui`: reads the current UI state back into
+/// `config` and persists it. Called on every settings change.
+fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
+    let mut config = state.config.borrow_mut();
+    config.close_after_launch_global = app.get_close_after_launch();
+    config.confirm_exit = app.get_confirm_exit();
+    config.default_shortcut = match app.get_default_shortcut_label().as_str() {
+        "" | NOT_SET => None,
+        combo => Some(combo.to_string()),
+    };
+
+    let theme = app.global::<Theme>();
+    let accent = theme.get_accent();
+    config.theme.accent =
+        crate::config::format_hex_rgb(accent.red(), accent.green(), accent.blue());
+    config.theme.set_dark(theme.get_dark());
+    config.theme.set_compact(theme.get_compact());
+
+    let _ = crate::config::save_config(&config);
+}
+
 fn build_launch_script(trainer: &TrainerItem) -> String {
     let mut script = format!("\"{}\" --hotkey \"{}\"", trainer.exe, trainer.shortcut);
     for cheat in trainer.cheats.iter() {
@@ -339,11 +392,20 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     };
     app.set_folder_path(folder_label.into());
     app.set_has_trainer_folder(trainer_folder.is_some());
-    app.set_default_shortcut_label("Ctrl + F12".into());
+    apply_settings_to_ui(app, &state.config.borrow());
 
     app.on_quit_app(|| {
         let _ = slint::quit_event_loop();
     });
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_settings_changed(move || {
+            let app = app_weak.unwrap();
+            persist_settings_from_ui(&app, &state);
+        });
+    }
 
     {
         let app_weak = app.as_weak();

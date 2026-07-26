@@ -10,7 +10,8 @@ import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
 
-export { TrainerItem, CheatEntry }
+// Theme is re-exported so app_state can seed it from config.json on startup.
+export { TrainerItem, CheatEntry, Theme, Palette }
 
 export enum AppView { home, settings }
 
@@ -159,17 +160,35 @@ export component AppWindow inherits Window {
         return 0;
     }
 
+    // The Theme global is what the whole UI renders from, but it can't notify
+    // Rust on its own, so every write to it goes through these three functions
+    // and reports the change so app_state can persist it to config.json.
+    public function set-accent(value: color) {
+        Theme.accent = value;
+        root.settings-changed();
+    }
+
+    public function set-dark-theme(on: bool) {
+        Theme.dark = on;
+        root.settings-changed();
+    }
+
+    public function set-compact-rows(on: bool) {
+        Theme.compact = on;
+        root.settings-changed();
+    }
+
     function cycle-accent(delta: int) {
-        Theme.accent = Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)];
+        root.set-accent(Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)]);
     }
 
     function move-settings-value(delta: int) {
         if root.settings-focused-index == 4 {
             root.cycle-accent(delta);
         } else if root.settings-focused-index == 5 {
-            Theme.dark = !Theme.dark;
+            root.set-dark-theme(!Theme.dark);
         } else if root.settings-focused-index == 6 {
-            Theme.compact = !Theme.compact;
+            root.set-compact-rows(!Theme.compact);
         }
     }
 
@@ -742,6 +761,10 @@ export component AppWindow inherits Window {
     callback set-cheat-key(int, string);
     callback keyboard-char(string);
     callback keyboard-backspace();
+    // Fired whenever any Settings value changes, from either the mouse/touch
+    // controls or the gamepad path; app_state reads the current values back
+    // off this window and writes them to config.json.
+    callback settings-changed();
 
     Timer {
         interval: 1800ms;
@@ -827,6 +850,9 @@ export component AppWindow inherits Window {
             back => { root.go-home(); }
             browse-folder => { root.browse-folder(); }
             record-default-shortcut => { root.start-default-shortcut-recording(); }
+            set-accent(value) => { root.set-accent(value); }
+            set-dark-theme(on) => { root.set-dark-theme(on); }
+            set-compact-rows(on) => { root.set-compact-rows(on); }
         }
 
         if root.delete-confirm-id >= 0: DeleteConfirmModal {
@@ -898,4 +924,11 @@ export component AppWindow inherits Window {
     changed recording => { if (!root.recording) { key-scope.focus(); } }
     changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
     changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
+
+    // These three are mutated both by the Settings screen's own controls (via
+    // two-way bindings / the key recorder) and by the gamepad handlers above,
+    // so watching the property covers every path in one place.
+    changed close-after-launch => { root.settings-changed(); }
+    changed confirm-exit => { root.settings-changed(); }
+    changed default-shortcut-label => { root.settings-changed(); }
 }
