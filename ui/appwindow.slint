@@ -10,7 +10,8 @@ import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
 
-export { TrainerItem, CheatEntry }
+// Theme is re-exported so app_state can seed it from config.json on startup.
+export { TrainerItem, CheatEntry, Theme, Palette }
 
 export enum AppView { home, settings }
 
@@ -56,6 +57,11 @@ export component AppWindow inherits Window {
     in-out property <string> total-size-label: "0.0 MB";
 
     in-out property <string> folder-path: "No folder selected";
+    // Gates everything that needs somewhere to put a trainer: the home
+    // screen's empty state asks for the folder instead of offering "Add
+    // trainer", and A/+ on Add routes to the folder picker. Kept in sync with
+    // config.trainer_folder by app_state.
+    in-out property <bool> has-trainer-folder: false;
     in-out property <string> default-shortcut-label: "Not set";
 
     in-out property <int> delete-confirm-id: -1;
@@ -70,8 +76,12 @@ export component AppWindow inherits Window {
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
     in-out property <[CheatEntry]> form-cheats: [];
+    // Absolute path of the exe picked in the Add-trainer form, kept alongside
+    // form-exe-display (filename only) because the file still has to be moved
+    // into the trainer folder on save. Empty when nothing is picked.
+    in-out property <string> form-exe-path: "";
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
-    // 1 Game executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
+    // 1 Trainer executable, 2 Shortcut, 3 Add cheat, one stop per cheat row,
     // then Cancel/Save last. Keep in sync with form-item-count()/
     // activate-form-focused() below and AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
@@ -150,17 +160,35 @@ export component AppWindow inherits Window {
         return 0;
     }
 
+    // The Theme global is what the whole UI renders from, but it can't notify
+    // Rust on its own, so every write to it goes through these three functions
+    // and reports the change so app_state can persist it to config.json.
+    public function set-accent(value: color) {
+        Theme.accent = value;
+        root.settings-changed();
+    }
+
+    public function set-dark-theme(on: bool) {
+        Theme.dark = on;
+        root.settings-changed();
+    }
+
+    public function set-compact-rows(on: bool) {
+        Theme.compact = on;
+        root.settings-changed();
+    }
+
     function cycle-accent(delta: int) {
-        Theme.accent = Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)];
+        root.set-accent(Palette.accents[Math.mod(root.accent-index() + delta, Palette.accents.length)]);
     }
 
     function move-settings-value(delta: int) {
         if root.settings-focused-index == 4 {
             root.cycle-accent(delta);
         } else if root.settings-focused-index == 5 {
-            Theme.dark = !Theme.dark;
+            root.set-dark-theme(!Theme.dark);
         } else if root.settings-focused-index == 6 {
-            Theme.compact = !Theme.compact;
+            root.set-compact-rows(!Theme.compact);
         }
     }
 
@@ -172,10 +200,17 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Name, Game executable, Shortcut, Add cheat, one stop per cheat row,
+    // Name, Trainer executable, Shortcut, Add cheat, one stop per cheat row,
     // Cancel/Save.
     function form-item-count() -> int {
         return 5 + root.form-cheats.length;
+    }
+
+    // The trainer-executable row (index 1) is only rendered when adding, so
+    // editing keeps every other index the same and steps over that one stop
+    // instead of renumbering the whole form.
+    function form-exe-field-visible() -> bool {
+        return root.editing-id < 0;
     }
 
     function move-form-selection(delta: int) {
@@ -183,6 +218,9 @@ export component AppWindow inherits Window {
             root.form-focused-index = 0;
         } else {
             root.form-focused-index = max(0, min(root.form-focused-index + delta, root.form-item-count() - 1));
+        }
+        if root.form-focused-index == 1 && !root.form-exe-field-visible() {
+            root.form-focused-index = delta < 0 ? 0 : 2;
         }
         root.form-sub-index = 0;
     }
@@ -395,12 +433,24 @@ export component AppWindow inherits Window {
         return root.home-header-focused && root.home-header-index == 0;
     }
 
-    // A on the empty-state action button: "Add trainer" normally, or - when
-    // a query is what's filtering the list down to nothing - clears and
-    // closes the search box entirely, same as the header's close icon.
+    // Every "add a trainer" entry point funnels through here: adding imports
+    // the picked exe into the trainer folder, so with no folder set there's
+    // nowhere to put it and the folder picker has to come first.
+    function request-add() {
+        if root.has-trainer-folder {
+            root.open-add();
+        } else {
+            root.browse-folder();
+        }
+    }
+
+    // A on the empty-state action button: the folder picker while no trainer
+    // folder is set, "Add trainer" once one is, or - when a query is what's
+    // filtering the list down to nothing - clears and closes the search box
+    // entirely, same as the header's close icon.
     function activate-empty-action() {
         if root.search-query.is-empty {
-            root.open-add();
+            root.request-add();
         } else {
             root.toggle-search();
             root.empty-action-focused = false;
@@ -494,7 +544,7 @@ export component AppWindow inherits Window {
         } else if root.home-header-index == 2 {
             root.edit-mode = !root.edit-mode;
         } else if root.home-header-index == 3 {
-            root.open-add();
+            root.request-add();
         } else if root.home-header-index == 4 {
             root.open-settings-view();
         }
@@ -558,7 +608,9 @@ export component AppWindow inherits Window {
                 root.open-keyboard("name", -1, root.form-name);
             }
         } else if root.form-focused-index == 1 {
-            root.browse-exe();
+            if root.form-exe-field-visible() {
+                root.browse-exe();
+            }
         } else if root.form-focused-index == 2 {
             root.start-shortcut-recording();
         } else if root.form-focused-index == 3 {
@@ -709,6 +761,10 @@ export component AppWindow inherits Window {
     callback set-cheat-key(int, string);
     callback keyboard-char(string);
     callback keyboard-backspace();
+    // Fired whenever any Settings value changes, from either the mouse/touch
+    // controls or the gamepad path; app_state reads the current values back
+    // off this window and writes them to config.json.
+    callback settings-changed();
 
     Timer {
         interval: 1800ms;
@@ -766,11 +822,13 @@ export component AppWindow inherits Window {
             header-focused: root.home-header-focused;
             header-index: root.home-header-index;
             empty-action-focused: root.empty-action-focused;
+            has-trainer-folder: root.has-trainer-folder;
             visible-trainers: root.visible-trainers;
             trainer-count: root.trainer-count;
             total-size-label: root.total-size-label;
 
-            open-add => { root.open-add(); }
+            open-add => { root.request-add(); }
+            select-folder => { root.browse-folder(); }
             open-settings => { root.open-settings-view(); }
             refresh => { root.refresh-trainers(); }
             launch-trainer(id) => { root.launch-trainer(id); }
@@ -792,6 +850,9 @@ export component AppWindow inherits Window {
             back => { root.go-home(); }
             browse-folder => { root.browse-folder(); }
             record-default-shortcut => { root.start-default-shortcut-recording(); }
+            set-accent(value) => { root.set-accent(value); }
+            set-dark-theme(on) => { root.set-dark-theme(on); }
+            set-compact-rows(on) => { root.set-compact-rows(on); }
         }
 
         if root.delete-confirm-id >= 0: DeleteConfirmModal {
@@ -814,6 +875,7 @@ export component AppWindow inherits Window {
             form-exe-display: root.form-exe-display;
             form-shortcut-display: root.form-shortcut-display;
             cheats: root.form-cheats;
+            show-exe-field: root.form-exe-field-visible();
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
@@ -862,4 +924,11 @@ export component AppWindow inherits Window {
     changed recording => { if (!root.recording) { key-scope.focus(); } }
     changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
     changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
+
+    // These three are mutated both by the Settings screen's own controls (via
+    // two-way bindings / the key recorder) and by the gamepad handlers above,
+    // so watching the property covers every path in one place.
+    changed close-after-launch => { root.settings-changed(); }
+    changed confirm-exit => { root.settings-changed(); }
+    changed default-shortcut-label => { root.settings-changed(); }
 }

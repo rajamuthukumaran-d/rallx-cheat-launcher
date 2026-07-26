@@ -46,9 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let (mut config, folder_path) = config::load_config();
-    config.trainer_folder = folder_path;
-    app_state::wire(&app, config);
+    app_state::wire(&app, config::load_config());
     gamepad::spawn_listener(app.as_weak());
 
     app.run()?;

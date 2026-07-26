@@ -7,5 +7,10 @@ export component ModalBackdrop inherits Rectangle {
     height: 100%;
     background: rgba(0, 0, 0, 0.6);
 
+    // Absorb clicks on the dimmed area so they don't fall through to the
+    // content behind the modal (e.g. activating a trainer row). Sits below
+    // @children so the modal box keeps its own touch handling.
+    TouchArea { }
+
     @children
 }

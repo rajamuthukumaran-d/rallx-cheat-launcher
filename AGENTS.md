@@ -19,8 +19,9 @@ Deck) with touch screen and gamepad input, not just mouse/keyboard.
 
 - **Language:** Rust (stable toolchain)
 - **UI:** [Slint](https://slint.dev/) — `.slint` files for markup, Rust for logic
-- **Config storage:** `config.json` inside the user-selected trainer folder
-  (not in `%APPDATA%`, not in the repo)
+- **Config storage:** `config.json` next to the app executable, for portable
+  behavior (not in `%APPDATA%`, not in the repo). The selected trainer folder
+  is a value inside it, so nothing else on disk is needed to find the config.
 - **Target platform:** Windows only. Don't add cross-platform abstractions unless
   explicitly asked — optimize for correctness on Windows first.
 
@@ -122,8 +123,10 @@ There is no test suite or CI config yet — if you add one, keep it Windows-only
 
 ## Things to avoid
 
-- Don't store config.json anywhere other than inside the selected trainer
-  folder — that's an explicit product requirement, not an implementation detail.
+- Don't store config.json anywhere other than next to the app executable —
+  that's an explicit product requirement, not an implementation detail. Don't
+  move it into the trainer folder, and don't reintroduce a separate bootstrap
+  pointer file (e.g. `last_folder.txt`) for locating it.
 - Don't commit anything under `mockups/temp`.
 - Don't build a general plugin/extension system, telemetry, or auto-update
   machinery — out of scope unless requested.

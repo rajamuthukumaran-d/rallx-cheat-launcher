@@ -7,12 +7,18 @@
 // not wired up yet - see trainer.rs/hotkey.rs for those.
 
 use std::cell::{Cell, RefCell};
+use std::path::Path;
 use std::rc::Rc;
 
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
-use crate::config::{AppConfig, TrainerConfig};
-use crate::{exe_icon, trainer, AppWindow, CheatEntry, TrainerItem};
+use crate::config::{AppConfig, CheatConfig, TrainerConfig};
+use crate::{exe_icon, trainer, AppWindow, CheatEntry, Palette, Theme, TrainerItem};
+
+// Placeholders the UI shows for an unassigned value; also the sentinels the
+// save path treats as "nothing configured" when writing config.json.
+const NO_EXE_PLACEHOLDER: &str = "No executable selected";
+const NOT_SET: &str = "Not set";
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
     (0x5b, 0x8c, 0xff),
@@ -93,7 +99,14 @@ fn config_to_trainer_item(
     let cheats: Vec<CheatEntry> = cfg
         .default_cheats
         .iter()
-        .map(|key| make_cheat(state, "", key))
+        .map(|cheat| {
+            let key = if cheat.key.is_empty() {
+                NOT_SET
+            } else {
+                &cheat.key
+            };
+            make_cheat(state, &cheat.label, key)
+        })
         .collect();
     let icon = exe_path.and_then(exe_icon::extract_icon);
     let size = format_size(cfg.size_bytes);
@@ -104,7 +117,7 @@ fn config_to_trainer_item(
             version: &cfg.version,
             size: &size,
             exe: &cfg.filename,
-            shortcut: cfg.launch_shortcut.as_deref().unwrap_or("Not set"),
+            shortcut: cfg.launch_shortcut.as_deref().unwrap_or(NOT_SET),
             cheats,
             icon,
         },
@@ -137,8 +150,10 @@ fn rescan_trainer_folder(state: &AppState) -> Vec<TrainerItem> {
 
     if let Ok(trainers) = trainer::sync_trainer_configs(&config.trainers, &folder) {
         config.trainers = trainers;
-        let _ = crate::config::save_config(&config);
     }
+    // Saved even when the scan failed: config.json is the only record of which
+    // folder was picked, so a newly chosen one must survive an unreadable dir.
+    let _ = crate::config::save_config(&config);
 
     trainer_items_from_config(state, &config)
 }
@@ -223,7 +238,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_title("Add trainer".into());
     app.set_form_save_label("Add trainer".into());
     app.set_form_name("".into());
-    app.set_form_exe_display("No executable selected".into());
+    app.set_form_exe_display(NO_EXE_PLACEHOLDER.into());
+    app.set_form_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
@@ -238,12 +254,115 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_form_save_label("Save changes".into());
     app.set_form_name(trainer.name.clone());
     app.set_form_exe_display(trainer.exe.clone());
+    // Editing never re-picks the exe (the field is hidden), so there's no
+    // source path to move on save.
+    app.set_form_exe_path("".into());
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
     app.set_show_add_edit(true);
+}
+
+/// Writes the form's user-editable fields (name, launch shortcut, cheats) onto
+/// the config entry for `filename`, creating that entry when the trainer was
+/// only just imported. Version and size are left empty for the folder rescan
+/// to fill in from the exe itself.
+fn apply_form_to_config(
+    state: &AppState,
+    filename: &str,
+    name: &str,
+    shortcut: &str,
+    cheats: &[CheatEntry],
+) {
+    let launch_shortcut = match shortcut.trim() {
+        "" | NOT_SET => None,
+        combo => Some(combo.to_string()),
+    };
+    let default_cheats: Vec<CheatConfig> = cheats
+        .iter()
+        .map(|cheat| CheatConfig {
+            label: cheat.label.to_string(),
+            key: match cheat.key.as_str() {
+                NOT_SET => String::new(),
+                key => key.to_string(),
+            },
+        })
+        .collect();
+
+    let mut config = state.config.borrow_mut();
+    if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
+        entry.name = name.to_string();
+        entry.launch_shortcut = launch_shortcut;
+        entry.default_cheats = default_cheats;
+    } else {
+        config.trainers.push(TrainerConfig {
+            name: name.to_string(),
+            filename: filename.to_string(),
+            version: String::new(),
+            size_bytes: 0,
+            game_exe: None,
+            launch_shortcut,
+            default_cheats,
+            close_after_launch: false,
+        });
+    }
+
+    let _ = crate::config::save_config(&config);
+}
+
+/// Resolves a stored accent to one of `Palette.accents`, falling back to the
+/// first swatch. Settings only ever offers those five, so a value from an older
+/// config that isn't among them would otherwise leave no swatch marked selected.
+fn palette_accent(app: &AppWindow, (r, g, b): (u8, u8, u8)) -> Color {
+    let accents = app.global::<Palette>().get_accents();
+    accents
+        .iter()
+        .find(|c| (c.red(), c.green(), c.blue()) == (r, g, b))
+        .or_else(|| accents.iter().next())
+        .unwrap_or(Color::from_rgb_u8(r, g, b))
+}
+
+/// Pushes the persisted settings into the UI: the plain window properties plus
+/// the Slint `Theme` global the whole UI renders from.
+fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
+    app.set_close_after_launch(config.close_after_launch_global);
+    app.set_confirm_exit(config.confirm_exit);
+    app.set_default_shortcut_label(
+        config
+            .default_shortcut
+            .as_deref()
+            .unwrap_or(NOT_SET)
+            .to_string()
+            .into(),
+    );
+
+    let theme = app.global::<Theme>();
+    theme.set_accent(palette_accent(app, config.theme.accent_rgb()));
+    theme.set_dark(config.theme.is_dark());
+    theme.set_compact(config.theme.is_compact());
+}
+
+/// The reverse of `apply_settings_to_ui`: reads the current UI state back into
+/// `config` and persists it. Called on every settings change.
+fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
+    let mut config = state.config.borrow_mut();
+    config.close_after_launch_global = app.get_close_after_launch();
+    config.confirm_exit = app.get_confirm_exit();
+    config.default_shortcut = match app.get_default_shortcut_label().as_str() {
+        "" | NOT_SET => None,
+        combo => Some(combo.to_string()),
+    };
+
+    let theme = app.global::<Theme>();
+    let accent = theme.get_accent();
+    config.theme.accent =
+        crate::config::format_hex_rgb(accent.red(), accent.green(), accent.blue());
+    config.theme.set_dark(theme.get_dark());
+    config.theme.set_compact(theme.get_compact());
+
+    let _ = crate::config::save_config(&config);
 }
 
 fn build_launch_script(trainer: &TrainerItem) -> String {
@@ -266,16 +385,27 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     *state.trainers.borrow_mut() = items;
     refresh_trainer_list(app, &state);
 
-    let folder_label = match state.config.borrow().trainer_folder.clone() {
-        Some(folder) => folder.display().to_string(),
+    let trainer_folder = state.config.borrow().trainer_folder.clone();
+    let folder_label = match trainer_folder {
+        Some(ref folder) => folder.display().to_string(),
         None => "No folder selected".to_string(),
     };
     app.set_folder_path(folder_label.into());
-    app.set_default_shortcut_label("Ctrl + F12".into());
+    app.set_has_trainer_folder(trainer_folder.is_some());
+    apply_settings_to_ui(app, &state.config.borrow());
 
     app.on_quit_app(|| {
         let _ = slint::quit_event_loop();
     });
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_settings_changed(move || {
+            let app = app_weak.unwrap();
+            persist_settings_from_ui(&app, &state);
+        });
+    }
 
     {
         let app_weak = app.as_weak();
@@ -354,10 +484,31 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         let state = state.clone();
         app.on_confirm_delete(move |id| {
             let app = app_weak.unwrap();
-            state.trainers.borrow_mut().retain(|t| t.id != id);
             app.set_delete_confirm_id(-1);
+
+            let Some(item) = find_trainer(&state, id) else {
+                return;
+            };
+            let folder = state.config.borrow().trainer_folder.clone();
+
+            if let Some(folder) = folder {
+                if let Err(err) = trainer::delete_trainer_file(&folder, &item.exe) {
+                    show_toast(&app, format!("Failed to delete {}: {err}", item.exe));
+                    return;
+                }
+                {
+                    let mut config = state.config.borrow_mut();
+                    config.trainers.retain(|t| t.filename != item.exe.as_str());
+                    let _ = crate::config::save_config(&config);
+                }
+                let items = rescan_trainer_folder(&state);
+                *state.trainers.borrow_mut() = items;
+            } else {
+                state.trainers.borrow_mut().retain(|t| t.id != id);
+            }
+
             refresh_trainer_list(&app, &state);
-            show_toast(&app, "Trainer deleted");
+            show_toast(&app, format!("Deleted {}", item.name));
         });
     }
 
@@ -387,61 +538,58 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             let app = app_weak.unwrap();
             let name = app.get_form_name().to_string();
             if name.trim().is_empty() {
+                show_toast(&app, "Enter a name for the trainer");
                 return;
             }
-            let exe_display = app.get_form_exe_display().to_string();
-            let exe = if exe_display == "No executable selected" {
-                "game.exe".to_string()
-            } else {
-                exe_display
-            };
             let shortcut = app.get_form_shortcut().to_string();
-            let shortcut = if shortcut.is_empty() {
-                "Not set".to_string()
-            } else {
-                shortcut
-            };
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
-            if editing_id < 0 {
-                let trainer = make_trainer(
-                    &state,
-                    NewTrainer {
-                        name: &name,
-                        version: "1.0.0",
-                        size: "— MB",
-                        exe: &exe,
-                        shortcut: &shortcut,
-                        cheats,
-                        icon: None,
-                    },
-                );
-                state.trainers.borrow_mut().push(trainer);
-                show_toast(&app, "Trainer added");
-            } else {
-                let mut trainers = state.trainers.borrow_mut();
-                if let Some(t) = trainers.iter_mut().find(|t| t.id == editing_id) {
-                    t.name = name.clone().into();
-                    t.exe = exe.into();
-                    t.shortcut = shortcut.into();
-                    t.cheats = ModelRc::new(VecModel::from(cheats));
-                    t.letter = name
-                        .chars()
-                        .next()
-                        .unwrap_or('?')
-                        .to_uppercase()
-                        .to_string()
-                        .into();
+            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                show_toast(&app, "Select a trainer folder in Settings first");
+                return;
+            };
+
+            // Adding imports the picked exe into the trainer folder first, so
+            // that the config entry it's about to get is keyed on the filename
+            // as it now exists there. Editing keeps the trainer's own file.
+            let filename = if editing_id < 0 {
+                let exe_path = app.get_form_exe_path().to_string();
+                if exe_path.is_empty() {
+                    show_toast(&app, "Pick a trainer executable");
+                    return;
                 }
-                drop(trainers);
-                show_toast(&app, "Trainer updated");
-            }
+                match trainer::import_trainer(Path::new(&exe_path), &folder) {
+                    Ok(filename) => filename,
+                    Err(err) => {
+                        show_toast(&app, err.to_string());
+                        return;
+                    }
+                }
+            } else {
+                let Some(trainer) = find_trainer(&state, editing_id) else {
+                    return;
+                };
+                trainer.exe.to_string()
+            };
+
+            apply_form_to_config(&state, &filename, name.trim(), &shortcut, &cheats);
+
+            let items = rescan_trainer_folder(&state);
+            *state.trainers.borrow_mut() = items;
 
             app.set_show_add_edit(false);
             app.set_form_focused_index(-1);
             app.set_form_sub_index(0);
             refresh_trainer_list(&app, &state);
+            show_toast(
+                &app,
+                if editing_id < 0 {
+                    "Trainer added"
+                } else {
+                    "Trainer updated"
+                },
+            );
         });
     }
 
@@ -523,18 +671,49 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             refresh_trainer_list(&app, &state);
 
             app.set_folder_path(folder.display().to_string().into());
+            app.set_has_trainer_folder(true);
             show_toast(&app, "Trainer folder updated");
         });
     }
 
     {
         let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_browse_exe(move || {
             let app = app_weak.unwrap();
-            if app.get_form_exe_display() == "No executable selected" {
-                app.set_form_exe_display("NewGame.exe".into());
+            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                show_toast(&app, "Select a trainer folder in Settings first");
+                return;
+            };
+
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("Executable", &["exe"])
+                .pick_file()
+            else {
+                return;
+            };
+
+            // Rejected here rather than on save so the user can correct the
+            // choice while the form is still open.
+            let filename = match trainer::validate_import(&path, &folder) {
+                Ok(filename) => filename,
+                Err(err) => {
+                    show_toast(&app, err.to_string());
+                    return;
+                }
+            };
+
+            app.set_form_exe_path(path.to_string_lossy().to_string().into());
+            app.set_form_exe_display(filename.into());
+
+            if app.get_form_name().trim().is_empty() {
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                app.set_form_name(stem.into());
             }
-            show_toast(&app, "Executable picker would open here");
         });
     }
 

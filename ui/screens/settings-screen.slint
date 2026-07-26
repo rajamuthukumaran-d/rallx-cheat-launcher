@@ -67,6 +67,11 @@ export component SettingsScreen inherits Rectangle {
     callback back();
     callback browse-folder();
     callback record-default-shortcut();
+    // Theme changes go back up to AppWindow rather than writing the Theme
+    // global here, so they can be persisted - see AppWindow.set-accent etc.
+    callback set-accent(color);
+    callback set-dark-theme(bool);
+    callback set-compact-rows(bool);
 
     background: Theme.bg;
 
@@ -306,7 +311,7 @@ export component SettingsScreen inherits Rectangle {
                                     }
 
                                     TouchArea {
-                                        clicked => { Theme.accent = hex; }
+                                        clicked => { root.set-accent(hex); }
                                     }
                                 }
                             }
@@ -331,12 +336,12 @@ export component SettingsScreen inherits Rectangle {
                                 Pill {
                                     label: "Dark";
                                     selected: Theme.dark;
-                                    clicked => { Theme.dark = true; }
+                                    clicked => { root.set-dark-theme(true); }
                                 }
                                 Pill {
                                     label: "Light";
                                     selected: !Theme.dark;
-                                    clicked => { Theme.dark = false; }
+                                    clicked => { root.set-dark-theme(false); }
                                 }
                             }
                         }
@@ -360,12 +365,12 @@ export component SettingsScreen inherits Rectangle {
                                 Pill {
                                     label: "Comfortable";
                                     selected: !Theme.compact;
-                                    clicked => { Theme.compact = false; }
+                                    clicked => { root.set-compact-rows(false); }
                                 }
                                 Pill {
                                     label: "Compact";
                                     selected: Theme.compact;
-                                    clicked => { Theme.compact = true; }
+                                    clicked => { root.set-compact-rows(true); }
                                 }
                             }
                         }

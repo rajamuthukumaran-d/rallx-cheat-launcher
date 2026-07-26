@@ -15,15 +15,21 @@ export component HomeScreen inherits Rectangle {
     // button; driven by AppWindow's move-selection/move-horizontal.
     in property <bool> header-focused: false;
     in property <int> header-index: 0;
-    // Gamepad/keyboard focus on the empty-state action button ("Add
-    // trainer" or "Clear search") when the trainer list is empty.
+    // Gamepad/keyboard focus on the empty-state action button ("Select
+    // folder", "Add trainer" or "Clear search") when the trainer list is
+    // empty.
     in property <bool> empty-action-focused: false;
+    // Without a trainer folder there's nowhere to put a trainer, so the empty
+    // state asks for the folder first and only offers "Add trainer" once one
+    // is set.
+    in property <bool> has-trainer-folder: false;
 
     in property <[TrainerItem]> visible-trainers;
     in property <int> trainer-count;
     in property <string> total-size-label;
 
     callback open-add();
+    callback select-folder();
     callback open-settings();
     callback refresh();
     callback launch-trainer(int);
@@ -179,7 +185,7 @@ export component HomeScreen inherits Rectangle {
                         bordered: false;
                         button-bg: Theme.accent;
                         icon-color: Theme.on-accent;
-                        tooltip-text: "Add trainer";
+                        tooltip-text: root.has-trainer-folder ? "Add trainer" : "Select trainer folder";
                         clicked => { root.open-add(); }
                     }
 
@@ -222,7 +228,7 @@ export component HomeScreen inherits Rectangle {
                     }
 
                     Text {
-                        text: "No trainers yet";
+                        text: root.has-trainer-folder ? "No trainers yet" : "No trainer folder selected";
                         color: Theme.text;
                         font-size: 22px;
                         font-weight: 600;
@@ -231,7 +237,9 @@ export component HomeScreen inherits Rectangle {
 
                     Text {
                         width: 340px;
-                        text: "Drag a trainer .exe into this window, or add one manually to get started.";
+                        text: root.has-trainer-folder
+                            ? "Drag a trainer .exe into this window, or add one manually to get started."
+                            : "Pick the folder your trainers live in. Every .exe inside it shows up here.";
                         color: Theme.text-dim;
                         font-size: 15px;
                         horizontal-alignment: center;
@@ -245,7 +253,13 @@ export component HomeScreen inherits Rectangle {
                         height: add-btn-layout.min-height;
 
                         add-empty-touch := TouchArea {
-                            clicked => { root.open-add(); }
+                            clicked => {
+                                if (root.has-trainer-folder) {
+                                    root.open-add();
+                                } else {
+                                    root.select-folder();
+                                }
+                            }
                         }
 
                         add-btn-layout := HorizontalLayout {
@@ -257,14 +271,16 @@ export component HomeScreen inherits Rectangle {
                             cross-axis-alignment: center;
 
                             Image {
-                                source: @image-url("../../assets/images/icons/add.svg");
+                                source: root.has-trainer-folder
+                                    ? @image-url("../../assets/images/icons/add.svg")
+                                    : @image-url("../../assets/images/icons/empty-folder.svg");
                                 width: 18px;
                                 height: 18px;
                                 colorize: Theme.on-accent;
                             }
 
                             Text {
-                                text: "Add trainer";
+                                text: root.has-trainer-folder ? "Add trainer" : "Select trainer folder";
                                 color: Theme.on-accent;
                                 font-size: 16px;
                                 font-weight: root.empty-action-focused ? 800 : 600;
