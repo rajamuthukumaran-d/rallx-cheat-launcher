@@ -6,7 +6,6 @@ export component TrayIcon inherits SystemTrayIcon {
     tooltip: "Rallx Cheat Launcher";
 
     in property <string> trainer-name;
-    in property <bool> can-launch: true;
 
     callback show-window();
     callback launch-trainer();
@@ -22,7 +21,6 @@ export component TrayIcon inherits SystemTrayIcon {
 
         MenuItem {
             title: "Launch " + root.trainer-name;
-            enabled: root.can-launch;
             activated => { root.launch-trainer(); }
         }
 

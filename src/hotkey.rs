@@ -41,14 +41,19 @@ impl Drop for HotkeyManager {
     }
 }
 
-/// Drains pending hotkey events and reports whether `id` was pressed. Key-up
-/// events are discarded so one physical press triggers exactly once.
-pub fn was_pressed(id: u32) -> bool {
+/// Drains pending hotkey events and returns the ids that were pressed, each at
+/// most once. Key-up events are discarded so one physical press reports
+/// exactly once.
+///
+/// The `global-hotkey` receiver is process-wide, so this hands back every id it
+/// saw rather than filtering to one: filtering here would consume and discard
+/// events belonging to any other registration.
+pub fn drain_pressed() -> Vec<u32> {
     let receiver = GlobalHotKeyEvent::receiver();
-    let mut pressed = false;
+    let mut pressed = Vec::new();
     while let Ok(event) = receiver.try_recv() {
-        if event.id() == id && event.state() == HotKeyState::Pressed {
-            pressed = true;
+        if event.state() == HotKeyState::Pressed && !pressed.contains(&event.id()) {
+            pressed.push(event.id());
         }
     }
     pressed

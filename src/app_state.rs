@@ -368,33 +368,61 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     let _ = crate::config::save_config(&config);
 }
 
+struct LaunchScript {
+    script: String,
+    has_hotkey: bool,
+    /// Keys that failed to parse and are therefore missing from `script`. An
+    /// unset key is not a failure and never appears here.
+    dropped: Vec<String>,
+}
+
+fn is_unset(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || trimmed == NOT_SET
+}
+
 /// Builds the command line that reruns this trainer in tray mode. Keys are
 /// normalized through `keys::parse_combo` so what lands on the clipboard is
 /// exactly what `launch_args` + `background` accept back; anything unparsable
-/// is dropped rather than pasted into a script that would refuse to start.
-fn build_launch_script(trainer: &TrainerItem, close_after_launch: bool) -> String {
+/// is dropped rather than pasted into a script that would refuse to start, and
+/// reported to the caller so the omission isn't silent.
+fn build_launch_script(trainer: &TrainerItem, close_after_launch: bool) -> LaunchScript {
     let exe = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "rallx-cheat-launcher.exe".to_string());
 
-    let hotkey = keys::parse_combo(&trainer.shortcut)
-        .ok()
-        .map(|combo| combo.canonical());
+    let mut dropped = Vec::new();
 
-    let cheats: Vec<String> = trainer
-        .cheats
-        .iter()
-        .filter_map(|cheat| keys::parse_combo(&cheat.key).ok())
-        .map(|combo| combo.canonical())
-        .collect();
+    let hotkey = match keys::parse_combo(&trainer.shortcut) {
+        Ok(combo) => Some(combo.canonical()),
+        Err(_) => {
+            if !is_unset(&trainer.shortcut) {
+                dropped.push(format!("shortcut \"{}\"", trainer.shortcut));
+            }
+            None
+        }
+    };
 
-    launch_args::build_launch_script(
-        &exe,
-        &trainer.exe,
-        hotkey.as_deref(),
-        &cheats,
-        close_after_launch,
-    )
+    let mut cheats = Vec::new();
+    for cheat in trainer.cheats.iter() {
+        match keys::parse_combo(&cheat.key) {
+            Ok(combo) => cheats.push(combo.canonical()),
+            Err(_) if is_unset(&cheat.key) => {}
+            Err(_) => dropped.push(format!("{} \"{}\"", cheat.label, cheat.key)),
+        }
+    }
+
+    LaunchScript {
+        script: launch_args::build_launch_script(
+            &exe,
+            &trainer.exe,
+            hotkey.as_deref(),
+            &cheats,
+            close_after_launch,
+        ),
+        has_hotkey: hotkey.is_some(),
+        dropped,
+    }
 }
 
 pub fn wire(app: &AppWindow, config: AppConfig) {
@@ -453,13 +481,30 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 return;
             };
 
-            match trainer::launch_trainer(&folder, &trainer.exe) {
-                Ok(_) if app.get_close_after_launch() => {
-                    let _ = slint::quit_event_loop();
-                }
-                Ok(_) => show_toast(&app, format!("Launched {}", trainer.name)),
-                Err(err) => show_toast(&app, format!("Failed to launch {}: {err}", trainer.name)),
-            }
+            // Most trainers need elevation, and that path blocks on the UAC
+            // prompt - on the UI thread the whole window would stop redrawing
+            // until the user answers it. The result comes back through the
+            // event loop.
+            let name = trainer.name.to_string();
+            let exe = trainer.exe.to_string();
+            let close_after_launch = app.get_close_after_launch();
+            let result_weak = app.as_weak();
+
+            std::thread::spawn(move || {
+                let result = trainer::launch_trainer(&folder, &exe);
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(app) = result_weak.upgrade() else {
+                        return;
+                    };
+                    match result {
+                        Ok(_) if close_after_launch => {
+                            let _ = slint::quit_event_loop();
+                        }
+                        Ok(_) => show_toast(&app, format!("Launched {name}")),
+                        Err(err) => show_toast(&app, format!("Failed to launch {name}: {err}")),
+                    }
+                });
+            });
         });
     }
 
@@ -492,12 +537,26 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                     .borrow()
                     .trainers
                     .iter()
-                    .find(|entry| entry.filename == trainer.exe.as_str())
+                    .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer.exe))
                     .is_some_and(|entry| entry.close_after_launch);
 
-                match clipboard::set_text(&build_launch_script(&trainer, close_after_launch)) {
-                    Ok(()) => show_toast(&app, "Launch script copied"),
+                let built = build_launch_script(&trainer, close_after_launch);
+                match clipboard::set_text(&built.script) {
                     Err(err) => show_toast(&app, format!("Could not copy script: {err}")),
+                    Ok(()) if !built.dropped.is_empty() => show_toast(
+                        &app,
+                        format!(
+                            "Copied without {} - not a usable key",
+                            built.dropped.join(", ")
+                        ),
+                    ),
+                    // Without a hotkey the script launches the trainer the
+                    // moment it runs, which is a different thing from what the
+                    // Home screen's play button does.
+                    Ok(()) if !built.has_hotkey => {
+                        show_toast(&app, "Copied - no shortcut set, so it launches immediately")
+                    }
+                    Ok(()) => show_toast(&app, "Launch script copied"),
                 }
             }
         });
@@ -771,5 +830,75 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 s.pop();
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(shortcut: &str, cheats: &[(&str, &str)]) -> TrainerItem {
+        let cheats: Vec<CheatEntry> = cheats
+            .iter()
+            .enumerate()
+            .map(|(index, (label, key))| CheatEntry {
+                id: index as i32,
+                label: (*label).into(),
+                key: (*key).into(),
+            })
+            .collect();
+        TrainerItem {
+            id: 1,
+            name: "RDR2".into(),
+            version: "1.0".into(),
+            size: "3.0 MB".into(),
+            exe: "rdr2-trainer.exe".into(),
+            shortcut: shortcut.into(),
+            color: Color::from_rgb_u8(0, 0, 0),
+            letter: "R".into(),
+            has_icon: false,
+            icon: Image::default(),
+            cheats: ModelRc::new(VecModel::from(cheats)),
+        }
+    }
+
+    #[test]
+    fn a_usable_shortcut_and_cheats_are_normalized_into_the_script() {
+        let built = build_launch_script(&item("insert", &[("Health", "ctrl+num1")]), false);
+
+        assert!(built.has_hotkey);
+        assert!(built.dropped.is_empty());
+        assert!(built.script.contains("--launch=\"rdr2-trainer.exe\""));
+        assert!(built.script.contains("--hotkey=\"Insert\""));
+        assert!(built.script.contains("--defaultcheat=\"Ctrl+Numpad1\""));
+        assert!(!built.script.contains("--closeafterlaunch"));
+    }
+
+    // An unassigned key is a legitimate "nothing configured", not a value the
+    // user should be warned about losing.
+    #[test]
+    fn unset_keys_are_omitted_without_being_reported() {
+        let built = build_launch_script(&item(NOT_SET, &[("Health", NOT_SET), ("Ammo", "")]), true);
+
+        assert!(!built.has_hotkey);
+        assert!(built.dropped.is_empty(), "{:?}", built.dropped);
+        assert!(!built.script.contains("--hotkey"));
+        assert!(!built.script.contains("--defaultcheat"));
+        assert!(built.script.contains("--closeafterlaunch"));
+    }
+
+    // A key that was set but can't be parsed is silently missing from the
+    // script, so the caller has to be able to say so.
+    #[test]
+    fn unparsable_keys_are_dropped_and_reported() {
+        let built = build_launch_script(
+            &item("banana", &[("Health", "ctrl+num1"), ("Ammo", "durian")]),
+            false,
+        );
+
+        assert!(!built.has_hotkey);
+        assert_eq!(built.dropped, ["shortcut \"banana\"", "Ammo \"durian\""]);
+        assert!(!built.script.contains("--hotkey"));
+        assert!(built.script.contains("--defaultcheat=\"Ctrl+Numpad1\""));
     }
 }

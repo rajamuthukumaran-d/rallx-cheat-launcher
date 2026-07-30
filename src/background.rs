@@ -133,11 +133,30 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
     })
 }
 
-/// Launches the trainer (first trigger only) and injects the default cheats.
-/// Runs off the UI thread because the injection sequence sleeps between combos.
 /// Set once the "cheats can't reach an elevated trainer" warning has been
 /// shown, so a hotkey held down doesn't stack up dialogs.
 static UIPI_WARNED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Default)]
+struct TriggerState {
+    /// Whether the trainer has been started at least once, so repeat hotkey
+    /// presses re-inject the cheats instead of spawning a second trainer.
+    launched: AtomicBool,
+    /// Held for the duration of one launch-and-inject sequence. A hotkey held
+    /// down auto-repeats, and two sequences running at once would interleave
+    /// their modifier down/up events into combos nobody configured.
+    running: AtomicBool,
+}
+
+/// Clears [`TriggerState::running`] however the sequence ends, including an
+/// early return on launch failure.
+struct RunningGuard(Arc<TriggerState>);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.0.running.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Windows UIPI silently discards injected input aimed at a higher-integrity
 /// window, and `SendInput` reports success anyway (documented: neither the
@@ -167,27 +186,50 @@ fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode)
     ));
 }
 
-fn trigger(plan: Arc<BackgroundPlan>, launched: Arc<AtomicBool>) {
+/// Launches the trainer if needed and injects the default cheats. Runs off the
+/// UI thread: the elevated launch path blocks on the UAC prompt and the
+/// injection sequence sleeps between combos.
+///
+/// `force_launch` distinguishes the tray menu's explicit "Launch" item, which
+/// must start the trainer every time it is clicked, from a hotkey press, which
+/// only re-injects once the trainer is already up.
+fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bool) {
+    if state.running.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let guard = RunningGuard(state.clone());
+
     std::thread::spawn(move || {
-        if !launched.swap(true, Ordering::SeqCst) {
+        let _guard = guard;
+
+        if force_launch || !state.launched.load(Ordering::SeqCst) {
             match trainer::launch_trainer(&plan.folder, &plan.filename) {
-                Ok(mode) => warn_if_cheats_cannot_reach(&plan, mode),
+                Ok(mode) => {
+                    state.launched.store(true, Ordering::SeqCst);
+                    warn_if_cheats_cannot_reach(&plan, mode);
+                }
                 Err(err) => {
                     crate::dialog::error(&format!("Failed to launch {}: {err}", plan.filename));
-                    launched.store(false, Ordering::SeqCst);
                     return;
                 }
             }
             std::thread::sleep(LAUNCH_SETTLE);
         }
 
+        let mut failed = Vec::new();
         for (index, combo) in plan.cheats.iter().enumerate() {
             if index > 0 {
                 std::thread::sleep(CHEAT_INTERVAL);
             }
             if let Err(err) = keys::press(combo) {
-                eprintln!("Failed to send {combo}: {err}");
+                failed.push(format!("{combo} ({err})"));
             }
+        }
+        // One dialog for the batch, not one per combo - and a dialog rather
+        // than stderr for the same reason the rest of tray mode uses them:
+        // there is no console to print to.
+        if !failed.is_empty() {
+            crate::dialog::error(&format!("Could not send {}", failed.join(", ")));
         }
 
         if plan.close_after_launch {
@@ -204,7 +246,7 @@ pub fn run(
     config: AppConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let plan = Arc::new(plan(options, &config)?);
-    let launched = Arc::new(AtomicBool::new(false));
+    let state = Arc::new(TriggerState::default());
 
     app_state::wire(&app, config);
     // The window stays hidden until the tray asks for it; closing it returns to
@@ -237,8 +279,10 @@ pub fn run(
 
     {
         let plan = plan.clone();
-        let launched = launched.clone();
-        tray.on_launch_trainer(move || trigger(plan.clone(), launched.clone()));
+        let state = state.clone();
+        // Clicking the menu item is an explicit request, so it starts the
+        // trainer again even after the hotkey already did once.
+        tray.on_launch_trainer(move || trigger(plan.clone(), state.clone(), true));
     }
 
     tray.on_quit_app(|| {
@@ -259,14 +303,14 @@ pub fn run(
             _manager = Some(manager);
 
             let plan = plan.clone();
-            let launched = launched.clone();
+            let state = state.clone();
             poll_timer.start(TimerMode::Repeated, HOTKEY_POLL, move || {
-                if hotkey::was_pressed(id) {
-                    trigger(plan.clone(), launched.clone());
+                if hotkey::drain_pressed().contains(&id) {
+                    trigger(plan.clone(), state.clone(), false);
                 }
             });
         }
-        None => trigger(plan.clone(), launched.clone()),
+        None => trigger(plan.clone(), state.clone(), false),
     }
 
     slint::run_event_loop_until_quit()?;
@@ -278,15 +322,31 @@ mod tests {
     use super::*;
     use crate::config::{CheatConfig, TrainerConfig};
 
-    fn trainer_folder(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "rallx-test-bg-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("rdr2-trainer.exe"), b"exe").unwrap();
-        dir
+    /// Cleans up on drop so a failing assertion doesn't leave the folder behind
+    /// for the next run to trip over.
+    struct TrainerFolder(PathBuf);
+
+    impl TrainerFolder {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "rallx-test-bg-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("rdr2-trainer.exe"), b"exe").unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TrainerFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     fn config(folder: &std::path::Path) -> AppConfig {
@@ -325,7 +385,7 @@ mod tests {
 
     #[test]
     fn cli_values_win_over_saved_ones() {
-        let folder = trainer_folder("cli");
+        let folder = TrainerFolder::new("cli");
         let plan = plan(
             &LaunchOptions {
                 trainer: Some("rdr2-trainer.exe".to_string()),
@@ -333,10 +393,9 @@ mod tests {
                 default_cheats: Some("num1,ctrl+num2".to_string()),
                 close_after_launch: true,
             },
-            &config(&folder),
+            &config(folder.path()),
         )
         .unwrap();
-        std::fs::remove_dir_all(&folder).unwrap();
 
         assert_eq!(plan.hotkey.unwrap().canonical(), "Ctrl+Numpad9");
         let cheats: Vec<String> = plan.cheats.iter().map(KeyCombo::canonical).collect();
@@ -346,9 +405,8 @@ mod tests {
 
     #[test]
     fn omitted_values_fall_back_to_the_saved_trainer() {
-        let folder = trainer_folder("saved");
-        let plan = plan(&options("rdr2-trainer.exe"), &config(&folder)).unwrap();
-        std::fs::remove_dir_all(&folder).unwrap();
+        let folder = TrainerFolder::new("saved");
+        let plan = plan(&options("rdr2-trainer.exe"), &config(folder.path())).unwrap();
 
         assert_eq!(plan.hotkey.unwrap().canonical(), "Insert");
         // The cheat with no key assigned is skipped rather than failing.
@@ -362,14 +420,13 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_global_shortcut_then_to_no_hotkey() {
-        let folder = trainer_folder("global");
-        let mut cfg = config(&folder);
+        let folder = TrainerFolder::new("global");
+        let mut cfg = config(folder.path());
         cfg.trainers[0].launch_shortcut = None;
         let with_global = plan(&options("rdr2-trainer.exe"), &cfg).unwrap();
 
         cfg.default_shortcut = None;
         let without = plan(&options("rdr2-trainer.exe"), &cfg).unwrap();
-        std::fs::remove_dir_all(&folder).unwrap();
 
         assert_eq!(with_global.hotkey.unwrap().canonical(), "Ctrl+F12");
         assert_eq!(without.hotkey, None);
@@ -377,10 +434,9 @@ mod tests {
 
     #[test]
     fn matches_a_trainer_by_display_name_and_ignores_case() {
-        let folder = trainer_folder("byname");
-        let by_name = plan(&options("rdr2"), &config(&folder)).unwrap();
-        let by_file = plan(&options("RDR2-Trainer.EXE"), &config(&folder)).unwrap();
-        std::fs::remove_dir_all(&folder).unwrap();
+        let folder = TrainerFolder::new("byname");
+        let by_name = plan(&options("rdr2"), &config(folder.path())).unwrap();
+        let by_file = plan(&options("RDR2-Trainer.EXE"), &config(folder.path())).unwrap();
 
         assert_eq!(by_name.filename, "rdr2-trainer.exe");
         assert_eq!(by_file.filename, "rdr2-trainer.exe");
@@ -390,13 +446,12 @@ mod tests {
     // do, so it resolves to the same entry as the bare filename.
     #[test]
     fn accepts_a_full_path_by_using_its_file_name() {
-        let folder = trainer_folder("fullpath");
+        let folder = TrainerFolder::new("fullpath");
         let plan = plan(
             &options("C:\\Users\\me\\Downloads\\Trainer\\rdr2-trainer.exe"),
-            &config(&folder),
+            &config(folder.path()),
         )
         .unwrap();
-        std::fs::remove_dir_all(&folder).unwrap();
 
         assert_eq!(plan.filename, "rdr2-trainer.exe");
         assert_eq!(plan.display_name, "RDR2");
@@ -404,26 +459,24 @@ mod tests {
 
     #[test]
     fn rejects_a_trainer_that_is_not_in_the_folder() {
-        let folder = trainer_folder("missing");
-        let err = plan(&options("nope.exe"), &config(&folder)).unwrap_err();
-        std::fs::remove_dir_all(&folder).unwrap();
+        let folder = TrainerFolder::new("missing");
+        let err = plan(&options("nope.exe"), &config(folder.path())).unwrap_err();
 
         assert!(err.contains("nope.exe"), "{err}");
     }
 
     #[test]
     fn rejects_an_unparsable_combo() {
-        let folder = trainer_folder("badkey");
+        let folder = TrainerFolder::new("badkey");
         let err = plan(
             &LaunchOptions {
                 trainer: Some("rdr2-trainer.exe".to_string()),
                 default_cheats: Some("num1,banana".to_string()),
                 ..LaunchOptions::default()
             },
-            &config(&folder),
+            &config(folder.path()),
         )
         .unwrap_err();
-        std::fs::remove_dir_all(&folder).unwrap();
 
         assert!(err.contains("banana"), "{err}");
     }

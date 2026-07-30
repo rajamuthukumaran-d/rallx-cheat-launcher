@@ -376,9 +376,6 @@ pub fn press(combo: &KeyCombo) -> Result<(), std::io::Error> {
         .map(|vk| key_input(*vk, *vk == VK_LWIN, false))
         .collect();
     down.push(key_input(combo.key.vk, combo.key.extended, false));
-    send(&down)?;
-
-    sleep(KEY_DWELL);
 
     let mut up = vec![key_input(combo.key.vk, combo.key.extended, true)];
     up.extend(
@@ -387,7 +384,14 @@ pub fn press(combo: &KeyCombo) -> Result<(), std::io::Error> {
             .rev()
             .map(|vk| key_input(*vk, *vk == VK_LWIN, true)),
     );
-    send(&up)
+
+    // The release batch goes out even when the press batch failed: SendInput
+    // reports a partial send, and whatever did get through is still logically
+    // held down system-wide. A stuck Ctrl is far worse than a dropped cheat.
+    let pressed = send(&down);
+    sleep(KEY_DWELL);
+    let released = send(&up);
+    pressed.and(released)
 }
 
 #[cfg(test)]
