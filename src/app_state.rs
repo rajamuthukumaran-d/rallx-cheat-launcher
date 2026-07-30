@@ -13,7 +13,10 @@ use std::rc::Rc;
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 use crate::config::{AppConfig, CheatConfig, TrainerConfig};
-use crate::{exe_icon, trainer, AppWindow, CheatEntry, Palette, Theme, TrainerItem};
+use crate::{
+    clipboard, exe_icon, keys, launch_args, trainer, AppWindow, CheatEntry, Palette, Theme,
+    TrainerItem,
+};
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
 // save path treats as "nothing configured" when writing config.json.
@@ -365,12 +368,33 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     let _ = crate::config::save_config(&config);
 }
 
-fn build_launch_script(trainer: &TrainerItem) -> String {
-    let mut script = format!("\"{}\" --hotkey \"{}\"", trainer.exe, trainer.shortcut);
-    for cheat in trainer.cheats.iter() {
-        script.push_str(&format!(" --cheat \"{}={}\"", cheat.label, cheat.key));
-    }
-    script
+/// Builds the command line that reruns this trainer in tray mode. Keys are
+/// normalized through `keys::parse_combo` so what lands on the clipboard is
+/// exactly what `launch_args` + `background` accept back; anything unparsable
+/// is dropped rather than pasted into a script that would refuse to start.
+fn build_launch_script(trainer: &TrainerItem, close_after_launch: bool) -> String {
+    let exe = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "rallx-cheat-launcher.exe".to_string());
+
+    let hotkey = keys::parse_combo(&trainer.shortcut)
+        .ok()
+        .map(|combo| combo.canonical());
+
+    let cheats: Vec<String> = trainer
+        .cheats
+        .iter()
+        .filter_map(|cheat| keys::parse_combo(&cheat.key).ok())
+        .map(|combo| combo.canonical())
+        .collect();
+
+    launch_args::build_launch_script(
+        &exe,
+        &trainer.exe,
+        hotkey.as_deref(),
+        &cheats,
+        close_after_launch,
+    )
 }
 
 pub fn wire(app: &AppWindow, config: AppConfig) {
@@ -430,10 +454,10 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             };
 
             match trainer::launch_trainer(&folder, &trainer.exe) {
-                Ok(()) if app.get_close_after_launch() => {
+                Ok(_) if app.get_close_after_launch() => {
                     let _ = slint::quit_event_loop();
                 }
-                Ok(()) => show_toast(&app, format!("Launched {}", trainer.name)),
+                Ok(_) => show_toast(&app, format!("Launched {}", trainer.name)),
                 Err(err) => show_toast(&app, format!("Failed to launch {}: {err}", trainer.name)),
             }
         });
@@ -461,8 +485,20 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         app.on_copy_script(move |id| {
             let app = app_weak.unwrap();
             if let Some(trainer) = find_trainer(&state, id) {
-                let _script = build_launch_script(&trainer);
-                show_toast(&app, "Launch script copied");
+                // The per-trainer flag exists only to generate this flag - it
+                // never closes the app on a UI launch (see PRD.md).
+                let close_after_launch = state
+                    .config
+                    .borrow()
+                    .trainers
+                    .iter()
+                    .find(|entry| entry.filename == trainer.exe.as_str())
+                    .is_some_and(|entry| entry.close_after_launch);
+
+                match clipboard::set_text(&build_launch_script(&trainer, close_after_launch)) {
+                    Ok(()) => show_toast(&app, "Launch script copied"),
+                    Err(err) => show_toast(&app, format!("Could not copy script: {err}")),
+                }
             }
         });
     }

@@ -1,50 +1,64 @@
 slint::include_modules!();
 
 mod app_state;
+mod background;
+mod clipboard;
 mod config;
+mod dialog;
 mod exe_icon;
 mod exe_version;
 mod gamepad;
 mod hotkey;
+mod keys;
+mod launch_args;
 mod trainer;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-
-    let mut launch_exe = None;
-    let mut hotkey = None;
-    let mut default_cheat = None;
-
-    for arg in args.iter().skip(1) {
-        if arg.starts_with("--launch=") {
-            launch_exe = Some(arg.trim_start_matches("--launch=").to_string());
-        } else if arg.starts_with("--hotkey=") {
-            hotkey = Some(arg.trim_start_matches("--hotkey=").to_string());
-        } else if arg.starts_with("--defaultcheat=") {
-            default_cheat = Some(arg.trim_start_matches("--defaultcheat=").to_string());
+/// Slint's default renderer fails on some handheld GPU drivers; the software
+/// renderer is the fallback both startup branches share.
+fn create_window() -> Result<AppWindow, slint::PlatformError> {
+    match AppWindow::new() {
+        Ok(app) => Ok(app),
+        Err(err) => {
+            eprintln!(
+                "Failed to initialize default renderer: {err}. Retrying with software renderer..."
+            );
+            std::env::set_var("SLINT_BACKEND", "winit-software");
+            AppWindow::new()
         }
     }
+}
 
-    if launch_exe.is_some() || hotkey.is_some() || default_cheat.is_some() {
-        println!("Running in background mode:");
-        println!("Launch: {:?}", launch_exe);
-        println!("Hotkey: {:?}", hotkey);
-        println!("Cheats: {:?}", default_cheat);
+/// Tray mode has no window and is usually started from a shortcut or .bat with
+/// no console attached, so a failure there would otherwise be completely
+/// silent - the process just wouldn't appear. Every startup failure on that
+/// branch gets a dialog as well as stderr.
+fn fatal(message: &str, code: i32) -> ! {
+    dialog::error(message);
+    std::process::exit(code);
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    let options = match launch_args::parse(&args) {
+        Ok(options) => options,
+        Err(err) => fatal(&err.to_string(), 2),
+    };
+
+    // Launch options select tray mode: the window is constructed but stays
+    // hidden until the tray icon asks for it.
+    if let Some(options) = options {
+        let app = match create_window() {
+            Ok(app) => app,
+            Err(err) => fatal(&format!("Could not create the window: {err}"), 1),
+        };
+        if let Err(err) = background::run(app, &options, config::load_config()) {
+            fatal(&err.to_string(), 1);
+        }
         return Ok(());
     }
 
-    let app_result = AppWindow::new();
-    let app = match app_result {
-        Ok(app) => app,
-        Err(e) => {
-            eprintln!(
-                "Failed to initialize default renderer: {}. Retrying with software renderer...",
-                e
-            );
-            std::env::set_var("SLINT_BACKEND", "winit-software");
-            AppWindow::new()?
-        }
-    };
+    let app = create_window()?;
 
     app_state::wire(&app, config::load_config());
     gamepad::spawn_listener(app.as_weak());

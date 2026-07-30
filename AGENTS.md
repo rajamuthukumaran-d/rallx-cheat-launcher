@@ -31,9 +31,10 @@ before pinning — don't assume the below are latest):
 - `gilrs` — gamepad/XInput input for controller navigation
 - `global-hotkey` — system-wide hotkey registration (e.g. Insert to trigger
   trainer + default cheats mid-game)
-- `tray-icon` — system tray icon + menu when running in background mode
+- ~~`tray-icon`~~ — not used: Slint's built-in `SystemTrayIcon` element covers
+  the tray icon + menu and shares the app's event loop (see `ui/tray.slint`)
 - `enigo` or the `windows` crate's `SendInput` — programmatic key press
-  injection for "default cheats"
+  injection for "default cheats" (`SendInput` is what `keys.rs` uses)
 - `windows` crate — exe icon extraction, any other Win32 interop
 - `notify` — only if live-watching the trainer folder becomes a requirement
 
@@ -43,13 +44,18 @@ Don't add a crate for something Slint or `std` already covers.
 
 ```
 src/
-  main.rs           # entry point, CLI arg parsing, tray/background mode branch
+  main.rs           # entry point, tray/background vs windowed startup branch
+  launch_args.rs    # CLI launch-option parsing + launch-script generation
+  background.rs     # tray mode: option -> config resolution, hotkey/tray loop
   config.rs         # config.json schema + load/save
-  trainer.rs        # trainer discovery, launch, keystroke injection
+  trainer.rs        # trainer discovery, launch, file import
+  keys.rs           # key-combo parsing + SendInput injection
   hotkey.rs         # global hotkey registration/handling
-  gamepad.rs         # gilrs polling -> UI navigation events
+  clipboard.rs      # Win32 clipboard write (copy launch script)
+  gamepad.rs        # gilrs polling -> UI navigation events
 ui/
   *.slint           # Slint component/screen files
+  tray.slint        # SystemTrayIcon component used by background mode
 mockups/            # contains mockup.html for visual reference
 ```
 

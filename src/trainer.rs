@@ -121,9 +121,110 @@ pub fn discover_trainers(folder: &Path) -> Result<Vec<TrainerInfo>, std::io::Err
     Ok(trainers)
 }
 
-pub fn launch_trainer(folder: &Path, filename: &str) -> Result<(), std::io::Error> {
+/// `CreateProcess` refuses to elevate, and virtually every trainer ships with a
+/// `requireAdministrator` manifest, so a plain spawn fails with ERROR_ELEVATION_
+/// REQUIRED. Only that case falls back to the shell, which raises the UAC
+/// prompt on the user's behalf.
+const ERROR_ELEVATION_REQUIRED: i32 = 740;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Spawned directly, so it runs at this process's integrity level.
+    Direct,
+    /// Elevated via the shell, so it runs at high integrity - which matters to
+    /// the caller because UIPI then blocks keystroke injection from a
+    /// non-elevated Rallx.
+    Elevated,
+}
+
+pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchMode, std::io::Error> {
     let full_path = folder.join(filename);
-    std::process::Command::new(full_path).spawn()?;
+    match std::process::Command::new(&full_path)
+        .current_dir(folder)
+        .spawn()
+    {
+        Ok(_) => Ok(LaunchMode::Direct),
+        Err(err) if err.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
+            launch_elevated(&full_path, folder).map(|()| LaunchMode::Elevated)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Whether this process is running elevated. Used to explain why injected
+/// cheats are being dropped, not to gate anything.
+pub fn is_elevated() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = Default::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = 0u32;
+        let queried = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        )
+        .is_ok();
+        CloseHandle(token).ok();
+
+        queried && elevation.TokenIsElevated != 0
+    }
+}
+
+fn wide(value: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    value
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+fn launch_elevated(exe: &Path, folder: &Path) -> Result<(), std::io::Error> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb: Vec<u16> = "runas\0".encode_utf16().collect();
+    let exe = wide(exe);
+    let folder = wide(folder);
+
+    // ShellExecuteW (and ShellExecuteEx without SEE_MASK_NOASYNC) returns
+    // before elevation finishes, and Windows abandons the pending UAC request
+    // if the requesting process exits first - which is exactly what
+    // --closeafterlaunch does a second later. NOASYNC keeps this call blocked
+    // until the user has answered the prompt.
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(exe.as_ptr()),
+        lpDirectory: PCWSTR(folder.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|err| {
+        std::io::Error::other(format!("could not launch elevated: {}", err.message()))
+    })?;
+
+    if !info.hProcess.is_invalid() {
+        unsafe { CloseHandle(info.hProcess) }.ok();
+    }
+
     Ok(())
 }
 

@@ -1,0 +1,36 @@
+// Tray presence for background/launch-option mode. A SystemTrayIcon is a
+// top-level component with no window of its own, so it lives outside
+// AppWindow and is exported alongside it.
+export component TrayIcon inherits SystemTrayIcon {
+    icon: @image-url("../assets/images/tray-icon.svg");
+    tooltip: "Rallx Cheat Launcher";
+
+    in property <string> trainer-name;
+    in property <bool> can-launch: true;
+
+    callback show-window();
+    callback launch-trainer();
+    callback quit-app();
+
+    clicked => { root.show-window(); }
+
+    Menu {
+        MenuItem {
+            title: "Open Rallx";
+            activated => { root.show-window(); }
+        }
+
+        MenuItem {
+            title: "Launch " + root.trainer-name;
+            enabled: root.can-launch;
+            activated => { root.launch-trainer(); }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            title: "Exit";
+            activated => { root.quit-app(); }
+        }
+    }
+}

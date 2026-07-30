@@ -9,12 +9,19 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 gilrs = "0.10.6"
 global-hotkey = "0.6.0"
-tray-icon = "0.19.1"
+# No tray-icon crate: Slint 1.17's built-in SystemTrayIcon element covers it
+# and keeps the tray on the same event loop as the window.
 windows = { version = "0.58.0", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_Security",
+    "Win32_System_DataExchange",
+    # SHELLEXECUTEINFOW (elevated trainer launch) is gated behind Registry.
+    "Win32_System_Registry",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
     "Win32_System_Threading",
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
