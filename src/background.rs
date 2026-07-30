@@ -135,13 +135,48 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
 
 /// Launches the trainer (first trigger only) and injects the default cheats.
 /// Runs off the UI thread because the injection sequence sleeps between combos.
+/// Set once the "cheats can't reach an elevated trainer" warning has been
+/// shown, so a hotkey held down doesn't stack up dialogs.
+static UIPI_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// Windows UIPI silently discards injected input aimed at a higher-integrity
+/// window, and `SendInput` reports success anyway (documented: neither the
+/// return value nor `GetLastError` indicates a UIPI block). So the only way the
+/// user learns why nothing happened is for us to say so up front.
+fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode) {
+    if plan.cheats.is_empty()
+        || mode != trainer::LaunchMode::Elevated
+        || trainer::is_elevated()
+        || UIPI_WARNED.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+
+    crate::dialog::warning(&format!(
+        "{} was launched with administrator rights, but Rallx Cheat Launcher is not.\n\n\
+         Windows blocks key injection into an elevated program, so the default \
+         cheats ({}) will not reach it.\n\n\
+         Start Rallx Cheat Launcher as administrator (right-click the shortcut or terminal -> \
+         Run as administrator) to make them work.",
+        plan.filename,
+        plan.cheats
+            .iter()
+            .map(KeyCombo::canonical)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+}
+
 fn trigger(plan: Arc<BackgroundPlan>, launched: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         if !launched.swap(true, Ordering::SeqCst) {
-            if let Err(err) = trainer::launch_trainer(&plan.folder, &plan.filename) {
-                eprintln!("Failed to launch {}: {err}", plan.filename);
-                launched.store(false, Ordering::SeqCst);
-                return;
+            match trainer::launch_trainer(&plan.folder, &plan.filename) {
+                Ok(mode) => warn_if_cheats_cannot_reach(&plan, mode),
+                Err(err) => {
+                    crate::dialog::error(&format!("Failed to launch {}: {err}", plan.filename));
+                    launched.store(false, Ordering::SeqCst);
+                    return;
+                }
             }
             std::thread::sleep(LAUNCH_SETTLE);
         }

@@ -127,17 +127,57 @@ pub fn discover_trainers(folder: &Path) -> Result<Vec<TrainerInfo>, std::io::Err
 /// prompt on the user's behalf.
 const ERROR_ELEVATION_REQUIRED: i32 = 740;
 
-pub fn launch_trainer(folder: &Path, filename: &str) -> Result<(), std::io::Error> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Spawned directly, so it runs at this process's integrity level.
+    Direct,
+    /// Elevated via the shell, so it runs at high integrity - which matters to
+    /// the caller because UIPI then blocks keystroke injection from a
+    /// non-elevated Rallx.
+    Elevated,
+}
+
+pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchMode, std::io::Error> {
     let full_path = folder.join(filename);
     match std::process::Command::new(&full_path)
         .current_dir(folder)
         .spawn()
     {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(LaunchMode::Direct),
         Err(err) if err.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
-            launch_elevated(&full_path, folder)
+            launch_elevated(&full_path, folder).map(|()| LaunchMode::Elevated)
         }
         Err(err) => Err(err),
+    }
+}
+
+/// Whether this process is running elevated. Used to explain why injected
+/// cheats are being dropped, not to gate anything.
+pub fn is_elevated() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::TOKEN_QUERY;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = Default::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = 0u32;
+        let queried = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        )
+        .is_ok();
+        CloseHandle(token).ok();
+
+        queried && elevation.TokenIsElevated != 0
     }
 }
 

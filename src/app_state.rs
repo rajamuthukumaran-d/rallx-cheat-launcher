@@ -454,10 +454,10 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             };
 
             match trainer::launch_trainer(&folder, &trainer.exe) {
-                Ok(()) if app.get_close_after_launch() => {
+                Ok(_) if app.get_close_after_launch() => {
                     let _ = slint::quit_event_loop();
                 }
-                Ok(()) => show_toast(&app, format!("Launched {}", trainer.name)),
+                Ok(_) => show_toast(&app, format!("Launched {}", trainer.name)),
                 Err(err) => show_toast(&app, format!("Failed to launch {}: {err}", trainer.name)),
             }
         });

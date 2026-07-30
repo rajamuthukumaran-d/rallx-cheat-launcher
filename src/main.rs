@@ -4,6 +4,7 @@ mod app_state;
 mod background;
 mod clipboard;
 mod config;
+mod dialog;
 mod exe_icon;
 mod exe_version;
 mod gamepad;
@@ -32,22 +33,7 @@ fn create_window() -> Result<AppWindow, slint::PlatformError> {
 /// silent - the process just wouldn't appear. Every startup failure on that
 /// branch gets a dialog as well as stderr.
 fn fatal(message: &str, code: i32) -> ! {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-
-    eprintln!("{message}");
-
-    let title: Vec<u16> = "Rallx Cheat Launcher\0".encode_utf16().collect();
-    let body: Vec<u16> = format!("{message}\0").encode_utf16().collect();
-    unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(body.as_ptr()),
-            PCWSTR(title.as_ptr()),
-            MB_OK | MB_ICONERROR,
-        )
-    };
-
+    dialog::error(message);
     std::process::exit(code);
 }
 
