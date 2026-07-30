@@ -11,18 +11,23 @@ mod gamepad;
 mod hotkey;
 mod keys;
 mod launch_args;
+mod renderer;
 mod trainer;
 
 /// Slint's default renderer fails on some handheld GPU drivers; the software
 /// renderer is the fallback both startup branches share.
-fn create_window() -> Result<AppWindow, slint::PlatformError> {
+///
+/// This only covers a backend that fails to build at all. The renderer itself
+/// is created lazily once the event loop shows a window, so the common failure
+/// lands in [`renderer::recover`] instead.
+pub fn create_window() -> Result<AppWindow, slint::PlatformError> {
     match AppWindow::new() {
         Ok(app) => Ok(app),
         Err(err) => {
             eprintln!(
                 "Failed to initialize default renderer: {err}. Retrying with software renderer..."
             );
-            std::env::set_var("SLINT_BACKEND", "winit-software");
+            renderer::force_software_backend();
             AppWindow::new()
         }
     }
@@ -63,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app_state::wire(&app, config::load_config());
     gamepad::spawn_listener(app.as_weak());
 
-    app.run()?;
-    Ok(())
+    // Nothing outside this process has happened yet, so a renderer failure here
+    // is always safe to restart from.
+    renderer::recover(app.run(), false)
 }

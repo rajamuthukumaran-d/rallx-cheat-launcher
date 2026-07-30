@@ -13,7 +13,7 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use crate::config::AppConfig;
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
-use crate::{app_state, gamepad, hotkey, trainer, AppWindow, TrayIcon};
+use crate::{app_state, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
 
 /// Head start the trainer gets before the first cheat combo is injected -
 /// keystrokes sent while it is still initializing are dropped.
@@ -146,6 +146,12 @@ struct TriggerState {
     /// down auto-repeats, and two sequences running at once would interleave
     /// their modifier down/up events into combos nobody configured.
     running: AtomicBool,
+    /// Whether a launch has been *asked for*, set before the worker thread
+    /// starts rather than after it succeeds. [`launched`](Self::launched) is
+    /// too late to gate a renderer restart on: the thread sets it well after
+    /// `trigger` returns, leaving a window where a restart would launch the
+    /// trainer a second time.
+    attempted: AtomicBool,
 }
 
 /// Clears [`TriggerState::running`] however the sequence ends, including an
@@ -194,6 +200,7 @@ fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode)
 /// must start the trainer every time it is clicked, from a hotkey press, which
 /// only re-injects once the trainer is already up.
 fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bool) {
+    state.attempted.store(true, Ordering::SeqCst);
     if state.running.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -293,14 +300,14 @@ pub fn run(
 
     // Kept alive for the whole event loop; dropping either would silently stop
     // the hotkey from firing.
-    let mut _manager = None;
+    let mut hotkey_manager = None;
     let poll_timer = Timer::default();
 
     match plan.hotkey {
         Some(combo) => {
             let mut manager = hotkey::HotkeyManager::new()?;
             let id = manager.register(&combo)?;
-            _manager = Some(manager);
+            hotkey_manager = Some(manager);
 
             let plan = plan.clone();
             let state = state.clone();
@@ -313,8 +320,20 @@ pub fn run(
         None => trigger(plan.clone(), state.clone(), false),
     }
 
-    slint::run_event_loop_until_quit()?;
-    Ok(())
+    let outcome = slint::run_event_loop_until_quit();
+
+    // A renderer restart re-runs this whole function in a child process, so
+    // everything only one process at a time may own has to go first: the timer
+    // that would keep polling, the hotkey the child needs to register, and the
+    // tray icon that would otherwise sit there twice.
+    drop(poll_timer);
+    drop(hotkey_manager);
+    drop(tray);
+    drop(app);
+
+    // The no-hotkey arm above already asked for a launch, so that run must not
+    // be restarted - it would launch a second copy.
+    renderer::recover(outcome, state.attempted.load(Ordering::SeqCst))
 }
 
 #[cfg(test)]
