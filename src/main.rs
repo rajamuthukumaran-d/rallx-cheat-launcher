@@ -1,50 +1,54 @@
 slint::include_modules!();
 
 mod app_state;
+mod background;
+mod clipboard;
 mod config;
 mod exe_icon;
 mod exe_version;
 mod gamepad;
 mod hotkey;
+mod keys;
+mod launch_args;
 mod trainer;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-
-    let mut launch_exe = None;
-    let mut hotkey = None;
-    let mut default_cheat = None;
-
-    for arg in args.iter().skip(1) {
-        if arg.starts_with("--launch=") {
-            launch_exe = Some(arg.trim_start_matches("--launch=").to_string());
-        } else if arg.starts_with("--hotkey=") {
-            hotkey = Some(arg.trim_start_matches("--hotkey=").to_string());
-        } else if arg.starts_with("--defaultcheat=") {
-            default_cheat = Some(arg.trim_start_matches("--defaultcheat=").to_string());
-        }
-    }
-
-    if launch_exe.is_some() || hotkey.is_some() || default_cheat.is_some() {
-        println!("Running in background mode:");
-        println!("Launch: {:?}", launch_exe);
-        println!("Hotkey: {:?}", hotkey);
-        println!("Cheats: {:?}", default_cheat);
-        return Ok(());
-    }
-
-    let app_result = AppWindow::new();
-    let app = match app_result {
-        Ok(app) => app,
-        Err(e) => {
+/// Slint's default renderer fails on some handheld GPU drivers; the software
+/// renderer is the fallback both startup branches share.
+fn create_window() -> Result<AppWindow, slint::PlatformError> {
+    match AppWindow::new() {
+        Ok(app) => Ok(app),
+        Err(err) => {
             eprintln!(
-                "Failed to initialize default renderer: {}. Retrying with software renderer...",
-                e
+                "Failed to initialize default renderer: {err}. Retrying with software renderer..."
             );
             std::env::set_var("SLINT_BACKEND", "winit-software");
-            AppWindow::new()?
+            AppWindow::new()
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    let options = match launch_args::parse(&args) {
+        Ok(options) => options,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(2);
         }
     };
+
+    let app = create_window()?;
+
+    // Launch options select tray mode: the window is constructed but stays
+    // hidden until the tray icon asks for it.
+    if let Some(options) = options {
+        if let Err(err) = background::run(app, &options, config::load_config()) {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     app_state::wire(&app, config::load_config());
     gamepad::spawn_listener(app.as_weak());
