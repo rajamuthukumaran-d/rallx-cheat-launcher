@@ -19,7 +19,7 @@ mod trainer;
 ///
 /// This only covers a backend that fails to build at all. The renderer itself
 /// is created lazily once the event loop shows a window, so the common failure
-/// lands in [`renderer::run_event_loop`] instead.
+/// lands in [`renderer::recover`] instead.
 pub fn create_window() -> Result<AppWindow, slint::PlatformError> {
     match AppWindow::new() {
         Ok(app) => Ok(app),
@@ -70,5 +70,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Nothing outside this process has happened yet, so a renderer failure here
     // is always safe to restart from.
-    renderer::run_event_loop(|| app.run(), || false)
+    renderer::recover(app.run(), false)
 }

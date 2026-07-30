@@ -30,30 +30,37 @@ fn backend_pinned() -> bool {
     std::env::var(BACKEND_ENV).is_ok_and(|value| !value.is_empty())
 }
 
-/// Runs a Slint event loop, retrying once with the software renderer when the
-/// default one turns out to be unusable.
+/// Turns an event-loop result into the process's result, retrying once with the
+/// software renderer when the default one turns out to be unusable.
 ///
 /// Slint creates the renderer lazily when the event loop shows the first
-/// window, so a dead GL driver surfaces here and not from `AppWindow::new` -
-/// which is why [`create_window`](crate::create_window) alone never catches it.
-/// The platform backend is cached in a thread-local `OnceCell` that cannot be
-/// replaced once set, so `SLINT_BACKEND` is not re-read in this process and the
-/// retry has to be a child process.
+/// window, so a dead GL driver surfaces from the loop and not from
+/// `AppWindow::new` - which is why [`create_window`](crate::create_window)
+/// alone never catches it. The platform backend is cached in a thread-local
+/// `OnceCell` that cannot be replaced once set, so `SLINT_BACKEND` is not
+/// re-read in this process and the retry has to be a child process.
+///
+/// The retry child is a second instance of this app, so the caller must first
+/// drop every OS-level singleton it holds - the global hotkey registration and
+/// the tray icon - or the child fails to register the same hotkey while the
+/// parent blocks on it. The parent also stays alive until the child exits, so
+/// this takes an already-computed `committed` rather than a closure: nothing
+/// may still be running that could change the answer.
 ///
 /// `committed` reports whether the process has already done something a restart
 /// would repeat - tray mode launches the trainer before the loop starts when no
 /// hotkey is configured. A committed process reports the failure instead of
 /// restarting, so a trainer is never launched twice.
-pub fn run_event_loop(
-    run: impl FnOnce() -> Result<(), slint::PlatformError>,
-    committed: impl Fn() -> bool,
+pub fn recover(
+    outcome: Result<(), slint::PlatformError>,
+    committed: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let err = match run() {
+    let err = match outcome {
         Ok(()) => return Ok(()),
         Err(err) => err,
     };
 
-    if !is_renderer_failure(&err) || committed() || backend_pinned() {
+    if !is_renderer_failure(&err) || committed || backend_pinned() {
         return Err(err.into());
     }
 
