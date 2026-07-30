@@ -44,7 +44,9 @@ pub fn set_text(text: &str) -> Result<(), windows::core::Error> {
             Err(err) => Err(err),
         };
 
-        CloseClipboard()?;
-        outcome
+        // The write's own result wins: a failure to close afterwards must not
+        // mask why the text never made it onto the clipboard.
+        let closed = CloseClipboard();
+        outcome.and(closed)
     }
 }

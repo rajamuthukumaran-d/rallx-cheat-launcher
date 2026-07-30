@@ -69,9 +69,10 @@ pub fn parse<S: AsRef<str>>(args: &[S]) -> Result<Option<LaunchOptions>, ArgErro
 
         let mut value = || match inline_value {
             Some(value) => Ok(unquote(value)),
+            // `next_if` so a flag that turns out to have no value leaves the
+            // following option in place instead of eating it.
             None => args
-                .next()
-                .filter(|next| !next.trim_start().starts_with("--"))
+                .next_if(|next| !next.trim_start().starts_with("--"))
                 .map(unquote)
                 .ok_or_else(|| ArgError::MissingValue(name.to_lowercase())),
         };
@@ -83,6 +84,12 @@ pub fn parse<S: AsRef<str>>(args: &[S]) -> Result<Option<LaunchOptions>, ArgErro
                 options.default_cheats = Some(value()?)
             }
             "closeafterlaunch" => options.close_after_launch = true,
+            // A bare path is what Explorer passes when a file is dropped onto
+            // the app's icon. That is a windowed-mode gesture, not a launch
+            // option, so it must not abort startup the way a misspelled flag
+            // should. Undashed tokens are checked against the flag names above
+            // first, so `launch=t.exe` still parses.
+            _ if !arg.starts_with('-') => continue,
             _ => return Err(ArgError::Unknown(arg.to_string())),
         }
     }
@@ -165,6 +172,18 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(options.close_after_launch);
+    }
+
+    // Dropping a file on the app's icon passes its path as a bare argument.
+    // That has to fall through to windowed mode, not kill startup.
+    #[test]
+    fn a_bare_path_is_ignored_rather_than_rejected() {
+        assert_eq!(parse(&["C:\\Users\\me\\Downloads\\trainer.exe"]), Ok(None));
+
+        let alongside = parse(&["C:\\drop\\t.exe", "--launch=t.exe"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(alongside.trainer.as_deref(), Some("t.exe"));
     }
 
     #[test]
