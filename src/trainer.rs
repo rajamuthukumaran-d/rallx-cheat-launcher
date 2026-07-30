@@ -121,9 +121,70 @@ pub fn discover_trainers(folder: &Path) -> Result<Vec<TrainerInfo>, std::io::Err
     Ok(trainers)
 }
 
+/// `CreateProcess` refuses to elevate, and virtually every trainer ships with a
+/// `requireAdministrator` manifest, so a plain spawn fails with ERROR_ELEVATION_
+/// REQUIRED. Only that case falls back to the shell, which raises the UAC
+/// prompt on the user's behalf.
+const ERROR_ELEVATION_REQUIRED: i32 = 740;
+
 pub fn launch_trainer(folder: &Path, filename: &str) -> Result<(), std::io::Error> {
     let full_path = folder.join(filename);
-    std::process::Command::new(full_path).spawn()?;
+    match std::process::Command::new(&full_path)
+        .current_dir(folder)
+        .spawn()
+    {
+        Ok(_) => Ok(()),
+        Err(err) if err.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
+            launch_elevated(&full_path, folder)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn wide(value: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    value
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+fn launch_elevated(exe: &Path, folder: &Path) -> Result<(), std::io::Error> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb: Vec<u16> = "runas\0".encode_utf16().collect();
+    let exe = wide(exe);
+    let folder = wide(folder);
+
+    // ShellExecuteW (and ShellExecuteEx without SEE_MASK_NOASYNC) returns
+    // before elevation finishes, and Windows abandons the pending UAC request
+    // if the requesting process exits first - which is exactly what
+    // --closeafterlaunch does a second later. NOASYNC keeps this call blocked
+    // until the user has answered the prompt.
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(exe.as_ptr()),
+        lpDirectory: PCWSTR(folder.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|err| {
+        std::io::Error::other(format!("could not launch elevated: {}", err.message()))
+    })?;
+
+    if !info.hProcess.is_invalid() {
+        unsafe { CloseHandle(info.hProcess) }.ok();
+    }
+
     Ok(())
 }
 

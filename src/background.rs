@@ -3,7 +3,7 @@
 //! waits for its hotkey, then launches the trainer and injects the configured
 //! default cheats.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +54,14 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
     else {
         return Err("--launch is required in background mode".to_string());
     };
+
+    // A hand-written script tends to carry the full path it was copied from,
+    // but trainers are always resolved inside the configured folder, so only
+    // the file name part is meaningful.
+    let requested = Path::new(requested)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(requested);
 
     // Trainers are referenced by filename, but matching the display name too
     // makes a hand-written script forgiving.
@@ -341,6 +349,22 @@ mod tests {
 
         assert_eq!(by_name.filename, "rdr2-trainer.exe");
         assert_eq!(by_file.filename, "rdr2-trainer.exe");
+    }
+
+    // Copying the trainer's full path out of Explorer is the obvious thing to
+    // do, so it resolves to the same entry as the bare filename.
+    #[test]
+    fn accepts_a_full_path_by_using_its_file_name() {
+        let folder = trainer_folder("fullpath");
+        let plan = plan(
+            &options("C:\\Users\\me\\Downloads\\Trainer\\rdr2-trainer.exe"),
+            &config(&folder),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&folder).unwrap();
+
+        assert_eq!(plan.filename, "rdr2-trainer.exe");
+        assert_eq!(plan.display_name, "RDR2");
     }
 
     #[test]
