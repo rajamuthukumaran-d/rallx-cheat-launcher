@@ -13,7 +13,7 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use crate::config::AppConfig;
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
-use crate::{app_state, gamepad, hotkey, trainer, AppWindow, TrayIcon};
+use crate::{app_state, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
 
 /// Head start the trainer gets before the first cheat combo is injected -
 /// keystrokes sent while it is still initializing are dropped.
@@ -313,8 +313,12 @@ pub fn run(
         None => trigger(plan.clone(), state.clone(), false),
     }
 
-    slint::run_event_loop_until_quit()?;
-    Ok(())
+    // The no-hotkey arm above already launched the trainer, so that run must not
+    // be restarted on a renderer failure - it would launch a second copy.
+    let committed = launched.clone();
+    renderer::run_event_loop(slint::run_event_loop_until_quit, move || {
+        committed.load(Ordering::SeqCst)
+    })
 }
 
 #[cfg(test)]
