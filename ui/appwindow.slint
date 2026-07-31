@@ -570,6 +570,20 @@ export component AppWindow inherits Window {
         root.view = AppView.home;
     }
 
+    // The Add-trainer form is about to open for a dropped .exe, so whatever
+    // else is holding the screen steps aside first: Settings drops back home,
+    // and search closes so its filter can't hide the trainer being added.
+    // Modal popups are handled separately - popup-open() refuses the drop
+    // outright rather than discarding what the user is part-way through.
+    public function clear-for-drop() {
+        if root.show-search {
+            root.toggle-search();
+        }
+        if root.view != AppView.home {
+            root.go-home();
+        }
+    }
+
     function start-default-shortcut-recording() {
         root.recording-target = "default";
         root.recorded-combo = "";

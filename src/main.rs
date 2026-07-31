@@ -75,8 +75,10 @@ fn enable_drag_drop(app: &AppWindow) {
     let attempts = std::cell::Cell::new(0u32);
     let timer = std::rc::Rc::new(slint::Timer::default());
 
-    // The timer's own closure owns the only handle to it, which is what keeps
-    // it alive - and stopping from in there is what breaks the cycle.
+    // The closure owns the only surviving handle to the timer it belongs to,
+    // which is what keeps the timer alive past this function. stop() doesn't
+    // break that cycle - it just takes the timer off the active list, which is
+    // all that's wanted, since it never has to fire again.
     let handle = timer.clone();
     timer.start(slint::TimerMode::Repeated, RETRY_INTERVAL, move || {
         let Some(app) = app_weak.upgrade() else {

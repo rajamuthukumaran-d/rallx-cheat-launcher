@@ -265,8 +265,10 @@ fn suggested_trainer_name(path: &Path) -> String {
 
 /// Points the open Add-trainer form at `path` (already validated against the
 /// trainer folder, so `filename` is what it will be imported as). Shared by the
-/// Browse… picker and the drag-and-drop path so both pre-fill identically; the
-/// name is only suggested while the field is still untouched.
+/// Browse… picker and the drag-and-drop path so both pre-fill identically. The
+/// name is only suggested into a still-empty field, which matters for Browse…
+/// picking a second exe after the user has typed - a drop always arrives into a
+/// form that was just cleared.
 fn prefill_form_exe(app: &AppWindow, path: &Path, filename: &str) {
     app.set_form_exe_path(path.to_string_lossy().to_string().into());
     app.set_form_exe_display(filename.into());
@@ -881,6 +883,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 }
             };
 
+            app.invoke_clear_for_drop();
             open_add_form(&app);
             prefill_form_exe(&app, &path, &filename);
         });
@@ -910,6 +913,21 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The user-visible half of the version-resource fallback: a trainer that
+    // names itself gets that name, and the many that don't must still land on
+    // something readable rather than an empty field.
+    #[test]
+    fn a_trainer_without_a_version_resource_is_named_after_its_file() {
+        let path =
+            std::env::temp_dir().join(format!("rallx-test-noname-{}.exe", std::process::id()));
+        std::fs::write(&path, b"not a real pe").unwrap();
+
+        let name = suggested_trainer_name(&path);
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(name, format!("rallx-test-noname-{}", std::process::id()));
+    }
 
     fn item(shortcut: &str, cheats: &[(&str, &str)]) -> TrainerItem {
         let cheats: Vec<CheatEntry> = cheats

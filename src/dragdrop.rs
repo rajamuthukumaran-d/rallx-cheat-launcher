@@ -135,6 +135,10 @@ pub fn enable(
             let _ = ChangeWindowMessageFilterEx(hwnd, message, MSGFLT_ALLOW, None);
         }
 
+        // winit's IDropTarget is deliberately not re-registered here: it stays
+        // revoked, so the window ends up with no drop handling at all rather
+        // than the handling it had before. Nothing is lost either way - Slint
+        // never surfaced winit's file-drop events to begin with.
         if !SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, handler as usize).as_bool() {
             drop(Box::from_raw(handler));
             DragAcceptFiles(hwnd, false);
