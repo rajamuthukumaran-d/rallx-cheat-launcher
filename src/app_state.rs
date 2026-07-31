@@ -61,6 +61,7 @@ struct NewTrainer<'a> {
     size: &'a str,
     exe: &'a str,
     game_exe: &'a str,
+    game_args: &'a str,
     shortcut: &'a str,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
@@ -84,6 +85,7 @@ fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
         size: fields.size.into(),
         exe: fields.exe.into(),
         game_exe: fields.game_exe.into(),
+        game_args: fields.game_args.into(),
         shortcut: fields.shortcut.into(),
         color,
         letter: letter.into(),
@@ -124,6 +126,7 @@ fn config_to_trainer_item(
             size: &size,
             exe: &cfg.filename,
             game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
+            game_args: cfg.game_args.as_deref().unwrap_or_default(),
             shortcut: cfg.launch_shortcut.as_deref().unwrap_or(NOT_SET),
             cheats,
             icon,
@@ -203,7 +206,7 @@ fn find_trainer(state: &AppState, id: i32) -> Option<TrainerItem> {
 }
 
 /// Applies a virtual-keyboard edit (insert/backspace) to whichever field
-/// `keyboard_target` names ("search" | "name" | "cheat"), then mirrors the
+/// `keyboard_target` names ("search" | "name" | "cheat" | "game-args"), then mirrors the
 /// result back into `keyboard_preview` so the popup's own display stays in
 /// sync. The actual string mutation happens here in Rust rather than in
 /// Slint, since Slint's imperative string API has no substring/pop support.
@@ -218,6 +221,7 @@ fn apply_keyboard_edit(app: &AppWindow, state: &AppState, edit: impl FnOnce(&mut
             refresh_trainer_list(app, state);
         }
         "name" => app.set_form_name(text.into()),
+        "game-args" => app.set_form_game_args(text.into()),
         "cheat" => {
             let id = app.get_keyboard_cheat_id();
             let cheats: Vec<CheatEntry> = cheats_to_vec(&app.get_form_cheats())
@@ -249,6 +253,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_exe_path("".into());
     app.set_form_game_exe_display(NO_GAME_PLACEHOLDER.into());
     app.set_form_game_exe_path("".into());
+    app.set_form_game_args("".into());
+    app.set_form_game_expanded(false);
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
@@ -284,13 +290,23 @@ fn prefill_form_exe(app: &AppWindow, path: &Path, filename: &str) {
     }
 }
 
-/// Points the form's Game executable field at `path`. The full path is what
+/// Points the form's Game section at a resolved selection. The full path is what
 /// gets shown as well as stored: the game stays where it is installed, so the
-/// bare filename wouldn't say which copy was picked.
-fn set_form_game_exe(app: &AppWindow, path: &Path) {
-    let display = path.to_string_lossy().to_string();
+/// bare filename wouldn't say which copy was picked. Launch options are only
+/// overwritten when the selection actually carried some, so re-picking the plain
+/// .exe after a .lnk doesn't silently wipe what the .lnk filled in.
+///
+/// The section is forced open because a drop can land on it while it's
+/// collapsed, and a value the user can't see is worse than one they didn't ask
+/// to look at.
+fn set_form_game_exe(app: &AppWindow, selection: &trainer::GameSelection) {
+    let display = selection.exe.to_string_lossy().to_string();
     app.set_form_game_exe_path(display.clone().into());
     app.set_form_game_exe_display(display.into());
+    if !selection.args.is_empty() {
+        app.set_form_game_args(selection.args.clone().into());
+    }
+    app.set_form_game_expanded(true);
 }
 
 fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
@@ -308,6 +324,10 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     } else {
         trainer.game_exe.clone()
     });
+    app.set_form_game_args(trainer.game_args.clone());
+    // Opened only when there's something in it, so the section stays out of the
+    // way for the trainers that have no game configured.
+    app.set_form_game_expanded(!trainer.game_exe.is_empty());
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
@@ -325,6 +345,7 @@ fn apply_form_to_config(
     filename: &str,
     name: &str,
     game_exe: &str,
+    game_args: &str,
     shortcut: &str,
     cheats: &[CheatEntry],
 ) {
@@ -335,6 +356,13 @@ fn apply_form_to_config(
     let game_exe = match game_exe.trim() {
         "" | NO_GAME_PLACEHOLDER => None,
         path => Some(path.to_string()),
+    };
+    // Launch options belong to the game, so they go with it rather than
+    // outliving a cleared game field.
+    let game_args = match game_args.trim() {
+        "" => None,
+        args if game_exe.is_some() => Some(args.to_string()),
+        _ => None,
     };
     let default_cheats: Vec<CheatConfig> = cheats
         .iter()
@@ -351,6 +379,7 @@ fn apply_form_to_config(
     if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
         entry.name = name.to_string();
         entry.game_exe = game_exe;
+        entry.game_args = game_args;
         entry.launch_shortcut = launch_shortcut;
         entry.default_cheats = default_cheats;
     } else {
@@ -360,6 +389,7 @@ fn apply_form_to_config(
             version: String::new(),
             size_bytes: 0,
             game_exe,
+            game_args,
             launch_shortcut,
             default_cheats,
             close_after_launch: false,
@@ -718,6 +748,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             }
             let shortcut = app.get_form_shortcut().to_string();
             let game_exe = app.get_form_game_exe_path().to_string();
+            let game_args = app.get_form_game_args().to_string();
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
@@ -754,6 +785,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 &filename,
                 name.trim(),
                 &game_exe,
+                &game_args,
                 &shortcut,
                 &cheats,
             );
@@ -895,14 +927,63 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         app.on_browse_game_exe(move || {
             let app = app_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
-                .add_filter("Executable", &["exe"])
+                .add_filter("Game or shortcut", &["exe", "lnk"])
                 .pick_file()
             else {
                 return;
             };
 
-            match trainer::validate_game_exe(&path) {
-                Ok(_) => set_form_game_exe(&app, &path),
+            match trainer::resolve_game_selection(&path) {
+                Ok(selection) => set_form_game_exe(&app, &selection),
+                Err(err) => show_toast(&app, err.to_string()),
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_generate_game_bat(move || {
+            let app = app_weak.unwrap();
+
+            // The .bat only ever needs the trainer's filename. While adding,
+            // the exe is still sitting wherever it was picked from and only
+            // moves into the trainer folder on save - but it keeps its name, so
+            // the reference is already correct.
+            let editing_id = app.get_editing_id();
+            let trainer_filename = if editing_id < 0 {
+                Path::new(&app.get_form_exe_path().to_string())
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            } else {
+                match find_trainer(&state, editing_id) {
+                    Some(item) => item.exe.to_string(),
+                    None => return,
+                }
+            };
+
+            let launcher = match std::env::current_exe() {
+                Ok(path) => path,
+                Err(err) => {
+                    show_toast(&app, format!("Could not locate Rallx: {err}"));
+                    return;
+                }
+            };
+
+            match trainer::generate_game_bat(
+                Path::new(&app.get_form_game_exe_path().to_string()),
+                app.get_form_game_args().as_ref(),
+                &launcher,
+                &trainer_filename,
+            ) {
+                Ok(path) => show_toast(
+                    &app,
+                    format!(
+                        "Created {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ),
+                ),
                 Err(err) => show_toast(&app, err.to_string()),
             }
         });
@@ -921,8 +1002,8 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             // from replacing what the user is part-way through.
             match app.invoke_form_drop_zone(x, y).as_str() {
                 "game" => {
-                    match trainer::validate_game_exe(&path) {
-                        Ok(_) => set_form_game_exe(&app, &path),
+                    match trainer::resolve_game_selection(&path) {
+                        Ok(selection) => set_form_game_exe(&app, &selection),
                         Err(err) => show_toast(&app, err.to_string()),
                     }
                     return;
@@ -1023,6 +1104,7 @@ mod tests {
             size: "3.0 MB".into(),
             exe: "rdr2-trainer.exe".into(),
             game_exe: "".into(),
+            game_args: "".into(),
             shortcut: shortcut.into(),
             color: Color::from_rgb_u8(0, 0, 0),
             letter: "R".into(),

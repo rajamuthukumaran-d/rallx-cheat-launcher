@@ -93,9 +93,17 @@ export component AppWindow inherits Window {
     // it is installed - so the path is what gets persisted, and is also what
     // form-game-exe-display shows: a bare filename wouldn't say which copy.
     in-out property <string> form-game-exe-path: "";
+    // Command-line arguments to start the game with, filled in automatically
+    // when a .lnk is picked and editable by hand otherwise. Only used to write
+    // the generated .bat - Rallx never launches the game itself.
+    in-out property <string> form-game-args: "";
+    // Whether the form's Game section is expanded. Opened automatically when
+    // the trainer being edited already has a game configured.
+    in-out property <bool> form-game-expanded: false;
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
-    // 1 Trainer executable, 2 Game executable, 3 Shortcut, 4 Add cheat, one
-    // stop per cheat row, then Cancel/Save last. Keep in sync with
+    // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
+    // launch options, 5 Generate .bat, 6 Shortcut, 7 Add cheat, one stop per
+    // cheat row, then Cancel/Save last. Keep in sync with
     // form-item-count()/activate-form-focused() below and
     // AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
@@ -112,7 +120,7 @@ export component AppWindow inherits Window {
     // Virtual keyboard: a gamepad-only alternative to typing, opened via A on
     // a focused text field (search box, trainer name, cheat label). keyboard-
     // target picks which underlying value keyboard-char/keyboard-backspace
-    // (handled in Rust) edit: "search" | "name" | "cheat".
+    // (handled in Rust) edit: "search" | "name" | "cheat" | "game-args".
     in-out property <bool> show-keyboard: false;
     in-out property <string> keyboard-target: "";
     in-out property <int> keyboard-cheat-id: -1;
@@ -222,10 +230,11 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Name, Trainer executable, Game executable, Shortcut, Add cheat, one stop
-    // per cheat row, Cancel/Save.
+    // Name, Trainer executable, Game section header, Game executable, Game
+    // launch options, Generate .bat, Shortcut, Add cheat, one stop per cheat
+    // row, Cancel/Save.
     function form-item-count() -> int {
-        return 6 + root.form-cheats.length;
+        return 9 + root.form-cheats.length;
     }
 
     // The trainer-executable row (index 1) is only rendered when adding, so
@@ -244,6 +253,11 @@ export component AppWindow inherits Window {
         if root.form-focused-index == 1 && !root.form-exe-field-visible() {
             root.form-focused-index = delta < 0 ? 0 : 2;
         }
+        // The Game section's three body rows collapse away together, so they
+        // are stepped over as one block back to the header or on to Shortcut.
+        if root.form-focused-index >= 3 && root.form-focused-index <= 5 && !root.form-game-expanded {
+            root.form-focused-index = delta < 0 ? 2 : 6;
+        }
         root.form-sub-index = 0;
     }
 
@@ -251,9 +265,9 @@ export component AppWindow inherits Window {
     // a cheat row (label, record key, remove), 2 for the final Cancel/Save
     // row, 1 everywhere else.
     function form-sub-count() -> int {
-        if root.form-focused-index >= 5 && root.form-focused-index < 5 + root.form-cheats.length {
+        if root.form-focused-index >= 8 && root.form-focused-index < 8 + root.form-cheats.length {
             return 3;
-        } else if root.form-focused-index == 5 + root.form-cheats.length {
+        } else if root.form-focused-index == 8 + root.form-cheats.length {
             return 2;
         }
         return 1;
@@ -678,22 +692,30 @@ export component AppWindow inherits Window {
                 root.browse-exe();
             }
         } else if root.form-focused-index == 2 {
-            root.browse-game-exe();
+            root.form-game-expanded = !root.form-game-expanded;
         } else if root.form-focused-index == 3 {
-            root.start-shortcut-recording();
+            root.browse-game-exe();
         } else if root.form-focused-index == 4 {
+            if via-gamepad {
+                root.open-keyboard("game-args", -1, root.form-game-args);
+            }
+        } else if root.form-focused-index == 5 {
+            root.generate-game-bat();
+        } else if root.form-focused-index == 6 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 7 {
             root.add-cheat-row();
-        } else if root.form-focused-index >= 5 && root.form-focused-index < 5 + root.form-cheats.length {
+        } else if root.form-focused-index >= 8 && root.form-focused-index < 8 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 if via-gamepad {
-                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 5].id, root.form-cheats[root.form-focused-index - 5].label);
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 8].id, root.form-cheats[root.form-focused-index - 8].label);
                 }
             } else if root.form-sub-index == 1 {
-                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 5].id);
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 8].id);
             } else if root.form-sub-index == 2 {
-                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 5].id);
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 8].id);
             }
-        } else if root.form-focused-index == 5 + root.form-cheats.length {
+        } else if root.form-focused-index == 8 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 root.cancel-form();
             } else {
@@ -824,6 +846,10 @@ export component AppWindow inherits Window {
     callback browse-folder();
     callback browse-exe();
     callback browse-game-exe();
+    // Writes the game's launch .bat next to the game executable. Handled in
+    // app_state, which reads form-game-exe-path/form-game-args and the trainer
+    // the form is on off this window.
+    callback generate-game-bat();
     callback add-cheat-row();
     callback remove-cheat-row(int);
     callback set-cheat-label(int, string);
@@ -962,15 +988,20 @@ export component AppWindow inherits Window {
             form-name <=> root.form-name;
             form-exe-display: root.form-exe-display;
             form-game-exe-display: root.form-game-exe-display;
+            form-game-args <=> root.form-game-args;
             form-shortcut-display: root.form-shortcut-display;
             cheats: root.form-cheats;
             show-exe-field: root.form-exe-field-visible();
+            game-expanded: root.form-game-expanded;
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
             name-changed(v) => { root.form-name = v; }
             browse-exe => { root.browse-exe(); }
             browse-game-exe => { root.browse-game-exe(); }
+            game-args-changed(v) => { root.form-game-args = v; }
+            toggle-game-section => { root.form-game-expanded = !root.form-game-expanded; }
+            generate-bat => { root.generate-game-bat(); }
             record-shortcut => { root.start-shortcut-recording(); }
             add-cheat => { root.add-cheat-row(); }
             remove-cheat(id) => { root.remove-cheat-row(id); }

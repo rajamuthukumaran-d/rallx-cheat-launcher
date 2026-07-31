@@ -393,6 +393,7 @@ mod tests {
                 version: "1.0".to_string(),
                 size_bytes: 3,
                 game_exe: None,
+                game_args: None,
                 launch_shortcut: Some("Insert".to_string()),
                 default_cheats: vec![
                     CheatConfig {

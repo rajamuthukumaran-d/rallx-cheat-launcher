@@ -81,22 +81,57 @@ pub fn validate_import(src: &Path, folder: &Path) -> Result<String, ImportError>
 pub enum GameExeError {
     NotAnExe,
     NotFound,
+    /// A .lnk was picked but the shell could not be asked what it points at.
+    UnreadableShortcut(String),
+    /// A .lnk resolved to something that isn't a usable .exe.
+    ShortcutTargetNotAnExe,
 }
 
 impl fmt::Display for GameExeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotAnExe => write!(f, "Only .exe files can be set as the game executable"),
+            Self::NotAnExe => write!(
+                f,
+                "Only .exe files or Windows shortcuts can be set as the game"
+            ),
             Self::NotFound => write!(f, "That executable no longer exists"),
+            Self::UnreadableShortcut(err) => write!(f, "Could not read that shortcut: {err}"),
+            Self::ShortcutTargetNotAnExe => {
+                write!(f, "That shortcut does not point at an executable")
+            }
         }
     }
 }
 
+fn is_shortcut(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+}
+
+/// What a user's pick for "the game" resolved to: the executable to start, and
+/// the command line to start it with (empty unless a .lnk carried arguments).
+#[derive(Debug, Clone)]
+pub struct GameSelection {
+    pub exe: std::path::PathBuf,
+    pub args: String,
+}
+
 /// Validates an executable picked as a trainer's game. Unlike a trainer, the
 /// game is referenced where it already lives - it is never moved into the
-/// trainer folder - so the path is only checked for being a real .exe, and the
-/// returned filename is just what the form displays.
-pub fn validate_game_exe(path: &Path) -> Result<String, GameExeError> {
+/// trainer folder - so the path is only checked for being a real .exe.
+///
+/// A .lnk is resolved through the shell first, which is the point of accepting
+/// one: store-, launcher- and user-made shortcuts are where a game's launch
+/// options normally live, so picking the shortcut fills in both fields at once.
+pub fn resolve_game_selection(path: &Path) -> Result<GameSelection, GameExeError> {
+    if is_shortcut(path) {
+        let (exe, args) = read_shortcut(path)?;
+        if !is_exe(&exe) || !exe.is_file() {
+            return Err(GameExeError::ShortcutTargetNotAnExe);
+        }
+        return Ok(GameSelection { exe, args });
+    }
+
     if !is_exe(path) {
         return Err(GameExeError::NotAnExe);
     }
@@ -104,10 +139,181 @@ pub fn validate_game_exe(path: &Path) -> Result<String, GameExeError> {
         return Err(GameExeError::NotFound);
     }
 
-    path.file_name()
-        .and_then(|f| f.to_str())
-        .map(str::to_string)
-        .ok_or(GameExeError::NotAnExe)
+    Ok(GameSelection {
+        exe: path.to_path_buf(),
+        args: String::new(),
+    })
+}
+
+/// Reads a .lnk's target path and arguments via IShellLinkW. There is no
+/// documented on-disk format for shell links that's safe to parse by hand -
+/// resolution involves the link tracking service - so this goes through COM.
+fn read_shortcut(path: &Path) -> Result<(std::path::PathBuf, String), GameExeError> {
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+
+    fn err(e: windows::core::Error) -> GameExeError {
+        GameExeError::UnreadableShortcut(e.message())
+    }
+
+    fn from_wide(buffer: &[u16]) -> String {
+        let end = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+        String::from_utf16_lossy(&buffer[..end])
+    }
+
+    unsafe {
+        // Slint's event loop does not initialize COM on this thread, and a
+        // second COM-using feature must not be able to tear it down for the
+        // first - so the uninit below is paired with this call only when this
+        // call is the one that did the initializing.
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let owns_com = init.is_ok();
+
+        let result = (|| -> Result<(std::path::PathBuf, String), GameExeError> {
+            let link: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(err)?;
+            let file: IPersistFile = link.cast().map_err(err)?;
+
+            let wide = wide(path);
+            file.Load(
+                PCWSTR(wide.as_ptr()),
+                windows::Win32::System::Com::STGM_READ,
+            )
+            .map_err(err)?;
+
+            // MAX_PATH is what IShellLinkW documents for both buffers; a longer
+            // target simply comes back truncated rather than overflowing.
+            let mut target = [0u16; 260];
+            link.GetPath(&mut target, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32)
+                .map_err(err)?;
+
+            let mut args = [0u16; 260];
+            link.GetArguments(&mut args).map_err(err)?;
+
+            Ok((
+                std::path::PathBuf::from(from_wide(&target)),
+                from_wide(&args).trim().to_string(),
+            ))
+        })();
+
+        if owns_com {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+/// Marker written as the .bat's first line so a regenerate can tell its own
+/// output apart from a file the user (or the game) put there under the same
+/// name, and refuse to clobber the latter.
+const BAT_MARKER: &str = "@rem Generated by Rallx Cheat Launcher";
+
+#[derive(Debug)]
+pub enum BatError {
+    NoGameExe,
+    NoTrainer,
+    /// A file of that name is already there and isn't one of ours.
+    WouldOverwrite(String),
+    Io(std::io::Error),
+}
+
+impl fmt::Display for BatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoGameExe => write!(f, "Pick the game executable first"),
+            Self::NoTrainer => write!(f, "Pick a trainer executable first"),
+            Self::WouldOverwrite(name) => {
+                write!(f, "{name} already exists and wasn't generated by Rallx")
+            }
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for BatError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+/// cmd expands `%FOO%` while reading each line, so a literal percent in a path
+/// or launch option has to be doubled or it silently disappears.
+fn bat_escape(value: &str) -> String {
+    value.replace('%', "%%")
+}
+
+/// Renders the .bat that starts the game and then hands off to Rallx in tray
+/// mode. Split out from [`generate_game_bat`] so the exact text is testable
+/// without touching the filesystem.
+pub fn build_game_bat(
+    game_exe: &Path,
+    game_args: &str,
+    launcher_exe: &Path,
+    trainer_filename: &str,
+) -> String {
+    let game = bat_escape(&game_exe.display().to_string());
+    let args = bat_escape(game_args.trim());
+    let launcher = bat_escape(&launcher_exe.display().to_string());
+    let trainer = bat_escape(trainer_filename);
+
+    let game_line = if args.is_empty() {
+        format!("start \"\" \"{game}\"")
+    } else {
+        format!("start \"\" \"{game}\" {args}")
+    };
+
+    // `start ""` (empty title) so the quoted path isn't swallowed as the window
+    // title, and `cd /d "%~dp0"` so the game gets its own folder as the working
+    // directory however the .bat itself was invoked.
+    //
+    // Only --launch is passed: background mode falls back to the trainer's own
+    // saved shortcut and cheats, so the .bat keeps working after they're edited.
+    format!(
+        "{BAT_MARKER}\r\n\
+         @echo off\r\n\
+         cd /d \"%~dp0\"\r\n\
+         {game_line}\r\n\
+         start \"\" \"{launcher}\" --launch=\"{trainer}\"\r\n"
+    )
+}
+
+/// Writes the launch .bat next to `game_exe`, named after it (`Game.exe` ->
+/// `Game.bat`), and returns where it landed.
+pub fn generate_game_bat(
+    game_exe: &Path,
+    game_args: &str,
+    launcher_exe: &Path,
+    trainer_filename: &str,
+) -> Result<std::path::PathBuf, BatError> {
+    if game_exe.as_os_str().is_empty() {
+        return Err(BatError::NoGameExe);
+    }
+    if trainer_filename.trim().is_empty() {
+        return Err(BatError::NoTrainer);
+    }
+
+    let stem = game_exe
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or(BatError::NoGameExe)?;
+    let folder = game_exe.parent().ok_or(BatError::NoGameExe)?;
+    let dest = folder.join(format!("{stem}.bat"));
+
+    if let Ok(existing) = std::fs::read_to_string(&dest) {
+        if !existing.starts_with(BAT_MARKER) {
+            return Err(BatError::WouldOverwrite(format!("{stem}.bat")));
+        }
+    }
+
+    std::fs::write(
+        &dest,
+        build_game_bat(game_exe, game_args, launcher_exe, trainer_filename),
+    )?;
+    Ok(dest)
 }
 
 /// Moves a validated executable into the trainer folder and returns its
@@ -277,6 +483,7 @@ pub fn sync_trainer_configs(
                 version,
                 size_bytes: info.size_bytes,
                 game_exe: None,
+                game_args: None,
                 launch_shortcut: None,
                 default_cheats: Vec::new(),
                 close_after_launch: false,
@@ -315,21 +522,100 @@ mod tests {
     // trainer import: living outside the trainer folder is the normal case and
     // must not be rejected, but a path that isn't a real .exe must be.
     #[test]
-    fn validate_game_exe_accepts_any_real_exe_and_rejects_the_rest() {
+    fn resolve_game_selection_accepts_any_real_exe_and_rejects_the_rest() {
         let dir = std::env::temp_dir().join(format!("rallx-test-game-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         write_exe(&dir, "game.exe", b"abc");
         write_exe(&dir, "notes.txt", b"abc");
 
-        let exe = validate_game_exe(&dir.join("game.exe"));
-        let txt = validate_game_exe(&dir.join("notes.txt"));
-        let missing = validate_game_exe(&dir.join("absent.exe"));
+        let exe = resolve_game_selection(&dir.join("game.exe"));
+        let txt = resolve_game_selection(&dir.join("notes.txt"));
+        let missing = resolve_game_selection(&dir.join("absent.exe"));
 
         std::fs::remove_dir_all(&dir).unwrap();
 
-        assert!(matches!(exe, Ok(ref name) if name == "game.exe"));
+        // A plain .exe carries no launch options - only a .lnk can supply them.
+        assert!(matches!(exe, Ok(ref sel) if sel.args.is_empty()));
         assert!(matches!(txt, Err(GameExeError::NotAnExe)));
         assert!(matches!(missing, Err(GameExeError::NotFound)));
+    }
+
+    #[test]
+    fn game_bat_starts_the_game_then_the_trainer() {
+        let bat = build_game_bat(
+            Path::new("C:\\Games\\RDR2\\RDR2.exe"),
+            "-dx12 -windowed",
+            Path::new("C:\\Rallx\\rallx-cheat-launcher.exe"),
+            "rdr2-trainer.exe",
+        );
+
+        let lines: Vec<&str> = bat.lines().collect();
+        assert_eq!(lines[0], BAT_MARKER);
+        assert_eq!(lines[2], "cd /d \"%~dp0\"");
+        assert_eq!(
+            lines[3],
+            "start \"\" \"C:\\Games\\RDR2\\RDR2.exe\" -dx12 -windowed"
+        );
+        assert_eq!(
+            lines[4],
+            "start \"\" \"C:\\Rallx\\rallx-cheat-launcher.exe\" --launch=\"rdr2-trainer.exe\""
+        );
+    }
+
+    #[test]
+    fn game_bat_omits_empty_options_and_doubles_percent_signs() {
+        let bat = build_game_bat(
+            Path::new("C:\\100%% Games\\g.exe"),
+            "   ",
+            Path::new("rallx.exe"),
+            "t.exe",
+        );
+
+        let lines: Vec<&str> = bat.lines().collect();
+        assert_eq!(lines[3], "start \"\" \"C:\\100%%%% Games\\g.exe\"");
+    }
+
+    #[test]
+    fn generate_game_bat_writes_next_to_the_game_and_wont_clobber_a_foreign_file() {
+        let dir = scratch("bat");
+        write_exe(&dir, "Game.exe", b"abc");
+
+        let written = generate_game_bat(
+            &dir.join("Game.exe"),
+            "-dx11",
+            Path::new("rallx.exe"),
+            "t.exe",
+        )
+        .unwrap();
+        let regenerated =
+            generate_game_bat(&dir.join("Game.exe"), "", Path::new("rallx.exe"), "t.exe");
+
+        // A .bat the user already had under that name is never overwritten.
+        std::fs::write(dir.join("Game.bat"), "echo mine\r\n").unwrap();
+        let foreign = generate_game_bat(&dir.join("Game.exe"), "", Path::new("rallx.exe"), "t.exe");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(written.file_name().unwrap(), "Game.bat");
+        assert!(regenerated.is_ok());
+        assert!(matches!(foreign, Err(BatError::WouldOverwrite(name)) if name == "Game.bat"));
+    }
+
+    #[test]
+    fn generate_game_bat_needs_both_a_game_and_a_trainer() {
+        assert!(matches!(
+            generate_game_bat(Path::new(""), "", Path::new("rallx.exe"), "t.exe"),
+            Err(BatError::NoGameExe)
+        ));
+        assert!(matches!(
+            generate_game_bat(
+                Path::new("C:\\g\\game.exe"),
+                "",
+                Path::new("rallx.exe"),
+                "  "
+            ),
+            Err(BatError::NoTrainer)
+        ));
     }
 
     #[test]
@@ -344,6 +630,7 @@ mod tests {
             version: "1.2.3".to_string(),
             size_bytes: 0,
             game_exe: Some("Game.exe".to_string()),
+            game_args: None,
             launch_shortcut: Some("Ctrl+F1".to_string()),
             default_cheats: vec![crate::config::CheatConfig {
                 label: "Infinite Health".to_string(),
@@ -378,6 +665,7 @@ mod tests {
             version: String::new(),
             size_bytes: 0,
             game_exe: None,
+            game_args: None,
             launch_shortcut: None,
             default_cheats: Vec::new(),
             close_after_launch: false,

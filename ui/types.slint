@@ -14,6 +14,8 @@ export struct TrainerItem {
     // path rather than a filename because the game lives wherever it was
     // installed, never in the trainer folder.
     game-exe: string,
+    // Command line the generated .bat starts game-exe with, or empty.
+    game-args: string,
     shortcut: string,
     color: color,
     letter: string,
