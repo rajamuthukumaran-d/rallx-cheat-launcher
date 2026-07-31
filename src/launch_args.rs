@@ -1,12 +1,18 @@
 //! Launch-option parsing for background/tray mode.
 //!
 //! ```text
-//! rallx-cheat-launcher.exe --launch="rdr2-trainer.exe" --hotkey="insert" \
-//!     --defaultcheat="ctrl+num1,num3,ctrl+num5" [--closeafterlaunch]
+//! rallx-cheat-launcher.exe --launch="rdr2-trainer.exe" [--hotkey="insert"] \
+//!     [--defaultcheat="ctrl+num1,num3,ctrl+num5"] [--closeafterlaunch] \
+//!     [--override]
 //! ```
 //!
 //! Presence of any of `--launch` / `--hotkey` / `--defaultcheat` selects the
 //! tray branch in `main`; without them the app starts windowed as usual.
+//!
+//! Only `--launch` is required: whatever else is left out is taken from that
+//! trainer's own saved settings, so the flags act as per-run overrides rather
+//! than a full specification. `--override` turns that off - see
+//! [`LaunchOptions::override_saved`].
 
 use std::fmt;
 
@@ -18,6 +24,12 @@ pub struct LaunchOptions {
     /// argument parsing stays independent of the key vocabulary.
     pub default_cheats: Option<String>,
     pub close_after_launch: bool,
+    /// `--override`: run from the command line alone, ignoring the trainer's
+    /// saved shortcut and cheats (and the global default shortcut) instead of
+    /// falling back to them. What the script says is then what it does, however
+    /// the trainer is edited afterwards. Named `override_saved` because
+    /// `override` is a reserved word in Rust.
+    pub override_saved: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +96,7 @@ pub fn parse<S: AsRef<str>>(args: &[S]) -> Result<Option<LaunchOptions>, ArgErro
                 options.default_cheats = Some(value()?)
             }
             "closeafterlaunch" => options.close_after_launch = true,
+            "override" => options.override_saved = true,
             // A bare path is what Explorer passes when a file is dropped onto
             // the app's icon. That is a windowed-mode gesture, not a launch
             // option, so it must not abort startup the way a misspelled flag
@@ -172,6 +185,23 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(options.close_after_launch);
+    }
+
+    #[test]
+    fn override_is_a_bare_flag_and_off_by_default() {
+        let with = parse(&["--launch=t.exe", "--override"]).unwrap().unwrap();
+        assert!(with.override_saved);
+
+        let without = parse(&["--launch=t.exe"]).unwrap().unwrap();
+        assert!(!without.override_saved);
+    }
+
+    // --override only changes how the other options are resolved, so on its own
+    // there is nothing to run in the tray and the app starts windowed - the same
+    // way --closeafterlaunch alone does.
+    #[test]
+    fn override_alone_does_not_select_tray_mode() {
+        assert_eq!(parse(&["--override"]), Ok(None));
     }
 
     // Dropping a file on the app's icon passes its path as a bare argument.

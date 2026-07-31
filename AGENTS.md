@@ -93,6 +93,10 @@ silently violate a requirement from another section.)
   by filename only, never full path).
 - **Launch-option / background mode:** CLI args like
   `--launch="rdr2-trainer.exe" --hotkey="insert" --defaultcheat="ctrl+num1,num3,ctrl+num5"`.
+  Only `--launch` is required — omitted values fall back to that trainer's
+  saved shortcut/cheats (then the global default shortcut), so the other flags
+  are per-run overrides. `--override` suppresses those fallbacks and takes the
+  hotkey and cheats from the command line alone.
   When launched with these args, the app must **not** show its window — it runs
   as a tray-only background process, waits for the hotkey, then launches the
   trainer and injects the default cheat keys.
