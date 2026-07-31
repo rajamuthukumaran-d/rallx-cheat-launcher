@@ -205,6 +205,12 @@ export component AppWindow inherits Window {
         } else {
             root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
         }
+        // The restart-as-admin button (index 5) is disabled once the process is
+        // already elevated, so step over it instead of parking focus on a stop
+        // where A does nothing.
+        if root.settings-focused-index == 5 && root.is-elevated {
+            root.settings-focused-index = delta < 0 ? 4 : 6;
+        }
     }
 
     // Name, Trainer executable, Shortcut, Add cheat, one stop per cheat row,
