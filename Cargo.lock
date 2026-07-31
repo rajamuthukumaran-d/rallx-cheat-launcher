@@ -3892,6 +3892,7 @@ version = "0.1.0"
 dependencies = [
  "gilrs",
  "global-hotkey",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
@@ -4494,6 +4495,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",
