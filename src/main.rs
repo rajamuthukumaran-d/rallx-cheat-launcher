@@ -1,3 +1,8 @@
+// Release builds are launched by double-clicking the exe (and in tray mode from
+// a shortcut), where a console window would be visible noise. Debug builds keep
+// the console so `cargo run` still shows the eprintln! diagnostics.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 slint::include_modules!();
 
 use slint::ComponentHandle;
