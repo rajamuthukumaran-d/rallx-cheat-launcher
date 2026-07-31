@@ -1,10 +1,13 @@
 slint::include_modules!();
 
+use slint::ComponentHandle;
+
 mod app_state;
 mod background;
 mod clipboard;
 mod config;
 mod dialog;
+mod dragdrop;
 mod elevate;
 mod exe_icon;
 mod exe_version;
@@ -41,6 +44,59 @@ pub fn create_window() -> Result<AppWindow, slint::PlatformError> {
 fn fatal(message: &str, code: i32) -> ! {
     dialog::error(message);
     std::process::exit(code);
+}
+
+/// Hands a dropped .exe path to the UI. Runs inside the window procedure, so
+/// the work is deferred rather than re-entering the UI from a native message.
+fn on_exe_dropped(app_weak: slint::Weak<AppWindow>) -> impl Fn(std::path::PathBuf) + 'static {
+    move |path| {
+        let app_weak = app_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.invoke_exe_dropped(path.to_string_lossy().to_string().into());
+            }
+        });
+    }
+}
+
+/// Installs the file-drop handler once the window it needs actually exists.
+///
+/// `show()` doesn't get us there: Slint creates the native window (and with it
+/// the HWND to subclass) on the event loop's first pass, so at startup there is
+/// nothing to attach to yet. Hence the poll - it stops on the first success.
+///
+/// Failing outright costs only this one way of adding a trainer, since the add
+/// icon and the Browse… picker are unaffected, so it's reported and ignored.
+fn enable_drag_drop(app: &AppWindow) {
+    const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    const MAX_ATTEMPTS: u32 = 40;
+
+    let app_weak = app.as_weak();
+    let attempts = std::cell::Cell::new(0u32);
+    let timer = std::rc::Rc::new(slint::Timer::default());
+
+    // The closure owns the only surviving handle to the timer it belongs to,
+    // which is what keeps the timer alive past this function. stop() doesn't
+    // break that cycle - it just takes the timer off the active list, which is
+    // all that's wanted, since it never has to fire again.
+    let handle = timer.clone();
+    timer.start(slint::TimerMode::Repeated, RETRY_INTERVAL, move || {
+        let Some(app) = app_weak.upgrade() else {
+            handle.stop();
+            return;
+        };
+
+        match dragdrop::enable(app.window(), on_exe_dropped(app.as_weak())) {
+            Ok(()) => handle.stop(),
+            Err(dragdrop::DragDropError::NoWindowHandle) if attempts.get() < MAX_ATTEMPTS => {
+                attempts.set(attempts.get() + 1);
+            }
+            Err(err) => {
+                eprintln!("Drag and drop unavailable: {err}");
+                handle.stop();
+            }
+        }
+    });
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -88,7 +144,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app_state::wire(&app, config);
     gamepad::spawn_listener(app.as_weak());
 
-    let outcome = app.run();
+    // Shown explicitly rather than through app.run() because the window has no
+    // HWND to hang the file-drop subclass off until it exists.
+    let outcome = match app.show() {
+        Ok(()) => {
+            enable_drag_drop(&app);
+            slint::run_event_loop()
+        }
+        Err(err) => Err(err),
+    };
+    let _ = app.hide();
     drop(app);
 
     elevate::finish_requested_restart();

@@ -130,7 +130,9 @@ export component AppWindow inherits Window {
     // on top of the screen - gamepad actions that act on background state
     // (list navigation, edit/delete/copy, search, settings) must no-op so a
     // popup press can't leak through to whatever is behind it.
-    function popup-open() -> bool {
+    // Public so the drag-and-drop handler in Rust can ignore a drop that lands
+    // while the user is part-way through another popup.
+    public function popup-open() -> bool {
         return root.other-popup-open() || root.show-keyboard;
     }
 
@@ -568,6 +570,20 @@ export component AppWindow inherits Window {
         root.view = AppView.home;
     }
 
+    // The Add-trainer form is about to open for a dropped .exe, so whatever
+    // else is holding the screen steps aside first: Settings drops back home,
+    // and search closes so its filter can't hide the trainer being added.
+    // Modal popups are handled separately - popup-open() refuses the drop
+    // outright rather than discarding what the user is part-way through.
+    public function clear-for-drop() {
+        if root.show-search {
+            root.toggle-search();
+        }
+        if root.view != AppView.home {
+            root.go-home();
+        }
+    }
+
     function start-default-shortcut-recording() {
         root.recording-target = "default";
         root.recorded-combo = "";
@@ -786,6 +802,11 @@ export component AppWindow inherits Window {
     // persists the pending settings first, since the new process reads them
     // back off config.json.
     callback restart-as-admin();
+    // An .exe dropped onto the window, as an absolute path. Raised from Rust
+    // (dragdrop.rs) rather than from any element here - Slint has no file-drop
+    // event - and handled by app_state, which opens the Add-trainer form
+    // pre-filled from the file.
+    callback exe-dropped(string);
 
     Timer {
         interval: 1800ms;

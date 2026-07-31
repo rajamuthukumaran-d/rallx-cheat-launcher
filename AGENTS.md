@@ -53,6 +53,7 @@ src/
   keys.rs           # key-combo parsing + SendInput injection
   hotkey.rs         # global hotkey registration/handling
   clipboard.rs      # Win32 clipboard write (copy launch script)
+  dragdrop.rs       # WM_DROPFILES window subclass -> dropped .exe path
   gamepad.rs        # gilrs polling -> UI navigation events
 ui/
   *.slint           # Slint component/screen files

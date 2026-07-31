@@ -7,15 +7,15 @@
 // not wired up yet - see trainer.rs/hotkey.rs for those.
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 
 use crate::config::{AppConfig, CheatConfig, TrainerConfig};
 use crate::{
-    clipboard, elevate, exe_icon, keys, launch_args, trainer, AppWindow, CheatEntry, Palette,
-    Theme, TrainerItem,
+    clipboard, elevate, exe_icon, exe_version, keys, launch_args, trainer, AppWindow, CheatEntry,
+    Palette, Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -249,6 +249,33 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
     app.set_show_add_edit(true);
+}
+
+/// The name to pre-fill the Add-trainer form with: what the exe calls itself,
+/// falling back to its filename for the many trainers that ship no version
+/// resource.
+fn suggested_trainer_name(path: &Path) -> String {
+    exe_version::extract_display_name(path).unwrap_or_else(|| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or_default()
+            .to_string()
+    })
+}
+
+/// Points the open Add-trainer form at `path` (already validated against the
+/// trainer folder, so `filename` is what it will be imported as). Shared by the
+/// Browse… picker and the drag-and-drop path so both pre-fill identically. The
+/// name is only suggested into a still-empty field, which matters for Browse…
+/// picking a second exe after the user has typed - a drop always arrives into a
+/// form that was just cleared.
+fn prefill_form_exe(app: &AppWindow, path: &Path, filename: &str) {
+    app.set_form_exe_path(path.to_string_lossy().to_string().into());
+    app.set_form_exe_display(filename.into());
+
+    if app.get_form_name().trim().is_empty() {
+        app.set_form_name(suggested_trainer_name(path).into());
+    }
 }
 
 fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
@@ -824,17 +851,41 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 }
             };
 
-            app.set_form_exe_path(path.to_string_lossy().to_string().into());
-            app.set_form_exe_display(filename.into());
+            prefill_form_exe(&app, &path, &filename);
+        });
+    }
 
-            if app.get_form_name().trim().is_empty() {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default()
-                    .to_string();
-                app.set_form_name(stem.into());
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_exe_dropped(move |dropped| {
+            let app = app_weak.unwrap();
+
+            // A drop landing while another popup is up would replace whatever
+            // the user is part-way through, so it's ignored rather than queued.
+            if app.invoke_popup_open() {
+                return;
             }
+
+            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                show_toast(&app, "Select a trainer folder in Settings first");
+                return;
+            };
+
+            let path = PathBuf::from(dropped.to_string());
+            // Same pre-import validation the Browse… picker runs, done before
+            // the form opens so a bad drop doesn't leave an empty popup behind.
+            let filename = match trainer::validate_import(&path, &folder) {
+                Ok(filename) => filename,
+                Err(err) => {
+                    show_toast(&app, err.to_string());
+                    return;
+                }
+            };
+
+            app.invoke_clear_for_drop();
+            open_add_form(&app);
+            prefill_form_exe(&app, &path, &filename);
         });
     }
 
@@ -862,6 +913,21 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The user-visible half of the version-resource fallback: a trainer that
+    // names itself gets that name, and the many that don't must still land on
+    // something readable rather than an empty field.
+    #[test]
+    fn a_trainer_without_a_version_resource_is_named_after_its_file() {
+        let path =
+            std::env::temp_dir().join(format!("rallx-test-noname-{}.exe", std::process::id()));
+        std::fs::write(&path, b"not a real pe").unwrap();
+
+        let name = suggested_trainer_name(&path);
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(name, format!("rallx-test-noname-{}", std::process::id()));
+    }
 
     fn item(shortcut: &str, cheats: &[(&str, &str)]) -> TrainerItem {
         let cheats: Vec<CheatEntry> = cheats
