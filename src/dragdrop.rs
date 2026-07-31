@@ -8,17 +8,26 @@ use std::fmt;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::Ole::RevokeDragDrop;
 use windows::Win32::UI::Shell::{
-    DefSubclassProc, DragAcceptFiles, DragFinish, DragQueryFileW, RemoveWindowSubclass,
-    SetWindowSubclass, HDROP,
+    DefSubclassProc, DragAcceptFiles, DragFinish, DragQueryFileW, DragQueryPoint,
+    RemoveWindowSubclass, SetWindowSubclass, HDROP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_DROPFILES, WM_NCDESTROY,
 };
 
-type Handler = Box<dyn Fn(PathBuf)>;
+type Handler = Box<dyn Fn(Drop)>;
+
+/// A completed file drop: the file, plus where on the window it was released.
+/// The point is in physical client pixels, which is what `DragQueryPoint`
+/// reports - the caller scales it into Slint's logical coordinates.
+pub struct Drop {
+    pub path: PathBuf,
+    pub x: i32,
+    pub y: i32,
+}
 
 const SUBCLASS_ID: usize = 1;
 
@@ -84,10 +93,19 @@ unsafe extern "system" fn subclass_proc(
         WM_DROPFILES => {
             let hdrop = HDROP(wparam.0 as *mut c_void);
             let path = first_dropped_path(hdrop);
+            // Reported even when the release was outside the client area, in
+            // which case the point is meaningless - but so is the drop, and the
+            // hit test below the UI rejects it either way.
+            let mut point = POINT::default();
+            let _ = DragQueryPoint(hdrop, &mut point);
             DragFinish(hdrop);
 
             if let Some(path) = path {
-                (*(handler as *const Handler))(path);
+                (*(handler as *const Handler))(Drop {
+                    path,
+                    x: point.x,
+                    y: point.y,
+                });
             }
             LRESULT(0)
         }
@@ -112,7 +130,7 @@ unsafe extern "system" fn subclass_proc(
 /// event loop rather than re-entering the UI directly.
 pub fn enable(
     window: &slint::Window,
-    on_file: impl Fn(PathBuf) + 'static,
+    on_file: impl Fn(Drop) + 'static,
 ) -> Result<(), DragDropError> {
     let hwnd = window_hwnd(window).ok_or(DragDropError::NoWindowHandle)?;
     let handler: *mut Handler = Box::into_raw(Box::new(Box::new(on_file)));

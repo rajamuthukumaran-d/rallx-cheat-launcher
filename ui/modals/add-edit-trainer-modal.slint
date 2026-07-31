@@ -57,11 +57,95 @@ component RecordButton inherits Rectangle {
     TouchArea { clicked => { root.clicked(); } }
 }
 
+// One "<something> executable" row: a read-only path display plus a Browse…
+// button. Also a drop target - it publishes its own rectangle in window
+// coordinates so AppWindow can hit-test a dropped file against it, since Slint
+// has no file-drop event of its own to attach here.
+component ExeField inherits Rectangle {
+    in property <string> label-text;
+    in property <string> value-text;
+    in property <bool> highlighted;
+    // Collapsed rather than removed when hidden, so the ids below stay
+    // reachable for the drop-zone bindings; a zero-height row also makes the
+    // hit test below fail on its own, with no separate visibility check.
+    in property <bool> shown: true;
+    callback browse();
+
+    out property <length> zone-left: self.absolute-position.x;
+    out property <length> zone-right: self.absolute-position.x + self.width;
+    out property <length> zone-top: self.absolute-position.y;
+    out property <length> zone-bottom: self.absolute-position.y + self.height;
+
+    visible: root.shown;
+    height: root.shown ? lay.min-height : 0px;
+
+    lay := VerticalLayout {
+        spacing: 6px;
+        padding-bottom: 20px;
+
+        FieldLabel {
+            text: root.label-text;
+            color: root.highlighted ? Theme.accent : Theme.text-dim;
+            font-weight: root.highlighted ? 700 : 600;
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            cross-axis-alignment: center;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 44px;
+                background: Theme.panel2;
+                border-width: 1px;
+                border-color: Theme.border;
+                border-radius: 8px;
+
+                Text {
+                    x: 14px;
+                    width: parent.width - 28px;
+                    height: 100%;
+                    vertical-alignment: center;
+                    text: root.value-text;
+                    color: Theme.text-dim;
+                    font-size: 15px;
+                    overflow: elide;
+                }
+            }
+
+            Rectangle {
+                background: Theme.panel2;
+                border-width: 1px;
+                border-color: Theme.border;
+                border-radius: 8px;
+                height: 44px;
+                width: browse-lay.min-width;
+
+                browse-lay := HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    alignment: center;
+                    cross-axis-alignment: center;
+                    Text {
+                        text: "Browse…";
+                        color: root.highlighted ? Theme.accent : Theme.text;
+                        font-size: 14px;
+                        font-weight: root.highlighted ? 700 : 600;
+                    }
+                }
+
+                TouchArea { clicked => { root.browse(); } }
+            }
+        }
+    }
+}
+
 export component AddEditTrainerModal inherits ModalBackdrop {
     in property <string> title-text: "Add trainer";
     in property <string> save-label: "Add trainer";
     in-out property <string> form-name;
     in property <string> form-exe-display: "No executable selected";
+    in property <string> form-game-exe-display: "No game selected";
     in property <string> form-shortcut-display: "Click to record shortcut";
     in property <[CheatEntry]> cheats;
     // The trainer executable is only pickable when adding - an existing
@@ -70,17 +154,43 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     // either way; AppWindow's move-form-selection skips index 1 when hidden.
     in property <bool> show-exe-field: true;
     // Gamepad focus target spanning the whole form: 0 Name, 1 Trainer
-    // executable, 2 Shortcut, 3 Add cheat, one stop per cheat row, then the
-    // Cancel/Save row last. -1 means nothing focused. Driven by AppWindow's
-    // move-form-selection/activate-form-focused via D-Pad up/down and A.
+    // executable, 2 Game executable, 3 Shortcut, 4 Add cheat, one stop per
+    // cheat row, then the Cancel/Save row last. -1 means nothing focused.
+    // Driven by AppWindow's move-form-selection/activate-form-focused via
+    // D-Pad up/down and A.
     in property <int> focused-index: -1;
     // Left/right position within the focused row (cheat row: 0 label,
     // 1 record key, 2 remove; Cancel/Save row: 0 Cancel, 1 Save). Driven by
     // AppWindow's move-form-sub-selection via D-Pad left/right.
     in property <int> sub-index: 0;
 
+    // Drop-zone rectangles of the two executable rows, in window coordinates,
+    // forwarded from the ExeFields for AppWindow's drop hit test. A row scrolled
+    // out of view still reports where it would be, so the hit test also clips
+    // against the scroll area below.
+    out property <length> content-top: scroll.absolute-position.y;
+    out property <length> content-bottom: scroll.absolute-position.y + scroll.height;
+    out property <length> trainer-zone-left: trainer-field.zone-left;
+    out property <length> trainer-zone-right: trainer-field.zone-right;
+    out property <length> trainer-zone-top: trainer-field.zone-top;
+    out property <length> trainer-zone-bottom: trainer-field.zone-bottom;
+    out property <length> game-zone-left: game-field.zone-left;
+    out property <length> game-zone-right: game-field.zone-right;
+    out property <length> game-zone-top: game-field.zone-top;
+    out property <length> game-zone-bottom: game-field.zone-bottom;
+
+    // This modal is hidden rather than destroyed when the form closes (see
+    // AppWindow), so the scroll offset would otherwise survive into the next
+    // trainer the user opens.
+    changed visible => {
+        if self.visible {
+            scroll.viewport-y = 0px;
+        }
+    }
+
     callback name-changed(string);
     callback browse-exe();
+    callback browse-game-exe();
     callback record-shortcut();
     callback add-cheat();
     callback remove-cheat(int);
@@ -138,7 +248,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                 }
             }
 
-            ScrollView {
+            scroll := ScrollView {
                 vertical-stretch: 1;
 
                 VerticalLayout {
@@ -147,11 +257,15 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     padding-right: 24px;
                     padding-top: 22px;
                     padding-bottom: 22px;
-                    spacing: 20px;
+                    // Rows carry their own bottom padding instead of the layout
+                    // spacing them, so a collapsed ExeField leaves no gap
+                    // behind in edit mode.
+                    spacing: 0px;
 
                     VerticalLayout {
                         vertical-stretch: 0;
                         spacing: 6px;
+                        padding-bottom: 20px;
                         FieldLabel {
                             text: "Name";
                             color: root.focused-index == 0 ? Theme.accent : Theme.text-dim;
@@ -165,76 +279,35 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         }
                     }
 
-                    if root.show-exe-field: VerticalLayout {
+                    trainer-field := ExeField {
                         vertical-stretch: 0;
-                        spacing: 6px;
-                        FieldLabel {
-                            text: "Trainer executable";
-                            color: root.focused-index == 1 ? Theme.accent : Theme.text-dim;
-                            font-weight: root.focused-index == 1 ? 700 : 600;
-                        }
+                        label-text: "Trainer executable";
+                        value-text: root.form-exe-display;
+                        highlighted: root.focused-index == 1;
+                        shown: root.show-exe-field;
+                        browse => { root.browse-exe(); }
+                    }
 
-                        HorizontalLayout {
-                            spacing: 10px;
-                            cross-axis-alignment: center;
-
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                height: 44px;
-                                background: Theme.panel2;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                border-radius: 8px;
-
-                                Text {
-                                    x: 14px;
-                                    width: parent.width - 28px;
-                                    height: 100%;
-                                    vertical-alignment: center;
-                                    text: root.form-exe-display;
-                                    color: Theme.text-dim;
-                                    font-size: 15px;
-                                    overflow: elide;
-                                }
-                            }
-
-                            Rectangle {
-                                background: Theme.panel2;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                border-radius: 8px;
-                                height: 44px;
-                                width: browse-lay.min-width;
-
-                                browse-lay := HorizontalLayout {
-                                    padding-left: 18px;
-                                    padding-right: 18px;
-                                    alignment: center;
-                                    cross-axis-alignment: center;
-                                    Text {
-                                        text: "Browse…";
-                                        color: root.focused-index == 1 ? Theme.accent : Theme.text;
-                                        font-size: 14px;
-                                        font-weight: root.focused-index == 1 ? 700 : 600;
-                                    }
-                                }
-
-                                TouchArea { clicked => { root.browse-exe(); } }
-                            }
-                        }
+                    game-field := ExeField {
+                        vertical-stretch: 0;
+                        label-text: "Game executable";
+                        value-text: root.form-game-exe-display;
+                        highlighted: root.focused-index == 2;
+                        browse => { root.browse-game-exe(); }
                     }
 
                     VerticalLayout {
                         vertical-stretch: 0;
                         spacing: 6px;
+                        padding-bottom: 20px;
                         FieldLabel {
                             text: "Shortcut to launch trainer";
-                            color: root.focused-index == 2 ? Theme.accent : Theme.text-dim;
-                            font-weight: root.focused-index == 2 ? 700 : 600;
+                            color: root.focused-index == 3 ? Theme.accent : Theme.text-dim;
+                            font-weight: root.focused-index == 3 ? 700 : 600;
                         }
                         RecordButton {
                             label: root.form-shortcut-display;
-                            highlighted: root.focused-index == 2;
+                            highlighted: root.focused-index == 3;
                             clicked => { root.record-shortcut(); }
                         }
                     }
@@ -249,8 +322,8 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             FieldLabel {
                                 horizontal-stretch: 1;
                                 text: "Cheats to enable";
-                                color: root.focused-index == 3 ? Theme.accent : Theme.text-dim;
-                                font-weight: root.focused-index == 3 ? 700 : 600;
+                                color: root.focused-index == 4 ? Theme.accent : Theme.text-dim;
+                                font-weight: root.focused-index == 4 ? 700 : 600;
                             }
 
                             Rectangle {
@@ -265,13 +338,13 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                         source: @image-url("../../assets/images/icons/add.svg");
                                         width: 14px;
                                         height: 14px;
-                                        colorize: root.focused-index == 3 ? Theme.accent.brighter(60%) : Theme.accent;
+                                        colorize: root.focused-index == 4 ? Theme.accent.brighter(60%) : Theme.accent;
                                     }
                                     Text {
                                         text: "Add cheat";
-                                        color: root.focused-index == 3 ? Theme.accent.brighter(60%) : Theme.accent;
+                                        color: root.focused-index == 4 ? Theme.accent.brighter(60%) : Theme.accent;
                                         font-size: 13px;
-                                        font-weight: root.focused-index == 3 ? 800 : 600;
+                                        font-weight: root.focused-index == 4 ? 800 : 600;
                                     }
                                 }
 
@@ -303,20 +376,20 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                     field-font-size: 14px;
                                     placeholder: "Cheat name (e.g. Infinite Health)";
                                     text: c.label;
-                                    highlighted: root.focused-index == i + 4 && root.sub-index == 0;
+                                    highlighted: root.focused-index == i + 5 && root.sub-index == 0;
                                     edited => { root.cheat-label-changed(c.id, self.text); }
                                 }
 
                                 RecordButton {
                                     width: 170px;
                                     label: c.key;
-                                    highlighted: root.focused-index == i + 4 && root.sub-index == 1;
+                                    highlighted: root.focused-index == i + 5 && root.sub-index == 1;
                                     clicked => { root.record-cheat(c.id); }
                                 }
 
                                 IconButton {
                                     icon: @image-url("../../assets/images/icons/close.svg");
-                                    icon-size: (root.focused-index == i + 4 && root.sub-index == 2) ? 18px : 14px;
+                                    icon-size: (root.focused-index == i + 5 && root.sub-index == 2) ? 18px : 14px;
                                     button-size: 36px;
                                     icon-color: Theme.danger;
                                     tooltip-text: "Remove cheat";
@@ -363,9 +436,9 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             alignment: center;
                             Text {
                                 text: "Cancel";
-                                color: (root.focused-index == 4 + root.cheats.length && root.sub-index == 0) ? Theme.accent : Theme.text;
+                                color: (root.focused-index == 5 + root.cheats.length && root.sub-index == 0) ? Theme.accent : Theme.text;
                                 font-size: 15px;
-                                font-weight: (root.focused-index == 4 + root.cheats.length && root.sub-index == 0) ? 800 : 600;
+                                font-weight: (root.focused-index == 5 + root.cheats.length && root.sub-index == 0) ? 800 : 600;
                             }
                         }
 
@@ -386,7 +459,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 text: root.save-label;
                                 color: Theme.on-accent;
                                 font-size: 15px;
-                                font-weight: (root.focused-index == 4 + root.cheats.length && root.sub-index == 1) ? 900 : 700;
+                                font-weight: (root.focused-index == 5 + root.cheats.length && root.sub-index == 1) ? 900 : 700;
                             }
                         }
 

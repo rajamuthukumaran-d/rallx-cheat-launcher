@@ -53,13 +53,23 @@ fn fatal(message: &str, code: i32) -> ! {
 
 /// Hands a dropped .exe path to the UI. Runs inside the window procedure, so
 /// the work is deferred rather than re-entering the UI from a native message.
-fn on_exe_dropped(app_weak: slint::Weak<AppWindow>) -> impl Fn(std::path::PathBuf) + 'static {
-    move |path| {
+///
+/// The drop point arrives in physical pixels and is divided by the scale factor
+/// on the way in, since every coordinate the UI hit-tests it against is a Slint
+/// logical length.
+fn on_exe_dropped(app_weak: slint::Weak<AppWindow>) -> impl Fn(dragdrop::Drop) + 'static {
+    move |drop| {
         let app_weak = app_weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
-            if let Some(app) = app_weak.upgrade() {
-                app.invoke_exe_dropped(path.to_string_lossy().to_string().into());
-            }
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let scale = app.window().scale_factor();
+            app.invoke_exe_dropped(
+                drop.path.to_string_lossy().to_string().into(),
+                drop.x as f32 / scale,
+                drop.y as f32 / scale,
+            );
         });
     }
 }

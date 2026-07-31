@@ -77,6 +77,39 @@ pub fn validate_import(src: &Path, folder: &Path) -> Result<String, ImportError>
     Ok(filename)
 }
 
+#[derive(Debug)]
+pub enum GameExeError {
+    NotAnExe,
+    NotFound,
+}
+
+impl fmt::Display for GameExeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAnExe => write!(f, "Only .exe files can be set as the game executable"),
+            Self::NotFound => write!(f, "That executable no longer exists"),
+        }
+    }
+}
+
+/// Validates an executable picked as a trainer's game. Unlike a trainer, the
+/// game is referenced where it already lives - it is never moved into the
+/// trainer folder - so the path is only checked for being a real .exe, and the
+/// returned filename is just what the form displays.
+pub fn validate_game_exe(path: &Path) -> Result<String, GameExeError> {
+    if !is_exe(path) {
+        return Err(GameExeError::NotAnExe);
+    }
+    if !path.is_file() {
+        return Err(GameExeError::NotFound);
+    }
+
+    path.file_name()
+        .and_then(|f| f.to_str())
+        .map(str::to_string)
+        .ok_or(GameExeError::NotAnExe)
+}
+
 /// Moves a validated executable into the trainer folder and returns its
 /// filename. Falls back to copy+delete because `fs::rename` fails when the
 /// source sits on a different volume than the trainer folder.
@@ -276,6 +309,27 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].filename, "trainer.exe");
         assert_eq!(found[0].size_bytes, 3);
+    }
+
+    // A game is referenced in place, so the checks are the opposite of a
+    // trainer import: living outside the trainer folder is the normal case and
+    // must not be rejected, but a path that isn't a real .exe must be.
+    #[test]
+    fn validate_game_exe_accepts_any_real_exe_and_rejects_the_rest() {
+        let dir = std::env::temp_dir().join(format!("rallx-test-game-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_exe(&dir, "game.exe", b"abc");
+        write_exe(&dir, "notes.txt", b"abc");
+
+        let exe = validate_game_exe(&dir.join("game.exe"));
+        let txt = validate_game_exe(&dir.join("notes.txt"));
+        let missing = validate_game_exe(&dir.join("absent.exe"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(matches!(exe, Ok(ref name) if name == "game.exe"));
+        assert!(matches!(txt, Err(GameExeError::NotAnExe)));
+        assert!(matches!(missing, Err(GameExeError::NotFound)));
     }
 
     #[test]

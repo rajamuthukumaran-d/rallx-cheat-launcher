@@ -21,6 +21,7 @@ use crate::{
 // Placeholders the UI shows for an unassigned value; also the sentinels the
 // save path treats as "nothing configured" when writing config.json.
 const NO_EXE_PLACEHOLDER: &str = "No executable selected";
+const NO_GAME_PLACEHOLDER: &str = "No game selected";
 const NOT_SET: &str = "Not set";
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
@@ -59,6 +60,7 @@ struct NewTrainer<'a> {
     version: &'a str,
     size: &'a str,
     exe: &'a str,
+    game_exe: &'a str,
     shortcut: &'a str,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
@@ -81,6 +83,7 @@ fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
         version: fields.version.into(),
         size: fields.size.into(),
         exe: fields.exe.into(),
+        game_exe: fields.game_exe.into(),
         shortcut: fields.shortcut.into(),
         color,
         letter: letter.into(),
@@ -120,6 +123,7 @@ fn config_to_trainer_item(
             version: &cfg.version,
             size: &size,
             exe: &cfg.filename,
+            game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
             shortcut: cfg.launch_shortcut.as_deref().unwrap_or(NOT_SET),
             cheats,
             icon,
@@ -243,6 +247,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_name("".into());
     app.set_form_exe_display(NO_EXE_PLACEHOLDER.into());
     app.set_form_exe_path("".into());
+    app.set_form_game_exe_display(NO_GAME_PLACEHOLDER.into());
+    app.set_form_game_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
@@ -278,6 +284,15 @@ fn prefill_form_exe(app: &AppWindow, path: &Path, filename: &str) {
     }
 }
 
+/// Points the form's Game executable field at `path`. The full path is what
+/// gets shown as well as stored: the game stays where it is installed, so the
+/// bare filename wouldn't say which copy was picked.
+fn set_form_game_exe(app: &AppWindow, path: &Path) {
+    let display = path.to_string_lossy().to_string();
+    app.set_form_game_exe_path(display.clone().into());
+    app.set_form_game_exe_display(display.into());
+}
+
 fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_editing_id(trainer.id);
     app.set_form_title("Edit trainer".into());
@@ -287,6 +302,12 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     // Editing never re-picks the exe (the field is hidden), so there's no
     // source path to move on save.
     app.set_form_exe_path("".into());
+    app.set_form_game_exe_path(trainer.game_exe.clone());
+    app.set_form_game_exe_display(if trainer.game_exe.is_empty() {
+        NO_GAME_PLACEHOLDER.into()
+    } else {
+        trainer.game_exe.clone()
+    });
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
@@ -303,12 +324,17 @@ fn apply_form_to_config(
     state: &AppState,
     filename: &str,
     name: &str,
+    game_exe: &str,
     shortcut: &str,
     cheats: &[CheatEntry],
 ) {
     let launch_shortcut = match shortcut.trim() {
         "" | NOT_SET => None,
         combo => Some(combo.to_string()),
+    };
+    let game_exe = match game_exe.trim() {
+        "" | NO_GAME_PLACEHOLDER => None,
+        path => Some(path.to_string()),
     };
     let default_cheats: Vec<CheatConfig> = cheats
         .iter()
@@ -324,6 +350,7 @@ fn apply_form_to_config(
     let mut config = state.config.borrow_mut();
     if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
         entry.name = name.to_string();
+        entry.game_exe = game_exe;
         entry.launch_shortcut = launch_shortcut;
         entry.default_cheats = default_cheats;
     } else {
@@ -332,7 +359,7 @@ fn apply_form_to_config(
             filename: filename.to_string(),
             version: String::new(),
             size_bytes: 0,
-            game_exe: None,
+            game_exe,
             launch_shortcut,
             default_cheats,
             close_after_launch: false,
@@ -690,6 +717,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 return;
             }
             let shortcut = app.get_form_shortcut().to_string();
+            let game_exe = app.get_form_game_exe_path().to_string();
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
@@ -721,7 +749,14 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 trainer.exe.to_string()
             };
 
-            apply_form_to_config(&state, &filename, name.trim(), &shortcut, &cheats);
+            apply_form_to_config(
+                &state,
+                &filename,
+                name.trim(),
+                &game_exe,
+                &shortcut,
+                &cheats,
+            );
 
             let items = rescan_trainer_folder(&state);
             *state.trainers.borrow_mut() = items;
@@ -857,12 +892,55 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
 
     {
         let app_weak = app.as_weak();
-        let state = state.clone();
-        app.on_exe_dropped(move |dropped| {
+        app.on_browse_game_exe(move || {
             let app = app_weak.unwrap();
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("Executable", &["exe"])
+                .pick_file()
+            else {
+                return;
+            };
 
-            // A drop landing while another popup is up would replace whatever
-            // the user is part-way through, so it's ignored rather than queued.
+            match trainer::validate_game_exe(&path) {
+                Ok(_) => set_form_game_exe(&app, &path),
+                Err(err) => show_toast(&app, err.to_string()),
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_exe_dropped(move |dropped, x, y| {
+            let app = app_weak.unwrap();
+            let path = PathBuf::from(dropped.to_string());
+
+            // A drop onto one of the open form's executable rows fills that
+            // field instead of starting a new trainer, so it's resolved before
+            // the popup guard below - which exists to stop an unrelated drop
+            // from replacing what the user is part-way through.
+            match app.invoke_form_drop_zone(x, y).as_str() {
+                "game" => {
+                    match trainer::validate_game_exe(&path) {
+                        Ok(_) => set_form_game_exe(&app, &path),
+                        Err(err) => show_toast(&app, err.to_string()),
+                    }
+                    return;
+                }
+                "trainer" => {
+                    let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+                        show_toast(&app, "Select a trainer folder in Settings first");
+                        return;
+                    };
+                    match trainer::validate_import(&path, &folder) {
+                        Ok(filename) => prefill_form_exe(&app, &path, &filename),
+                        Err(err) => show_toast(&app, err.to_string()),
+                    }
+                    return;
+                }
+                _ => {}
+            }
+
             if app.invoke_popup_open() {
                 return;
             }
@@ -872,7 +950,6 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 return;
             };
 
-            let path = PathBuf::from(dropped.to_string());
             // Same pre-import validation the Browse… picker runs, done before
             // the form opens so a bad drop doesn't leave an empty popup behind.
             let filename = match trainer::validate_import(&path, &folder) {
@@ -945,6 +1022,7 @@ mod tests {
             version: "1.0".into(),
             size: "3.0 MB".into(),
             exe: "rdr2-trainer.exe".into(),
+            game_exe: "".into(),
             shortcut: shortcut.into(),
             color: Color::from_rgb_u8(0, 0, 0),
             letter: "R".into(),
