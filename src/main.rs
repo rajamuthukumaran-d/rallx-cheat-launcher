@@ -5,6 +5,7 @@ mod background;
 mod clipboard;
 mod config;
 mod dialog;
+mod elevate;
 mod exe_icon;
 mod exe_version;
 mod gamepad;
@@ -50,6 +51,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => fatal(&err.to_string(), 2),
     };
 
+    let config = config::load_config();
+
+    // Integrity level is fixed when a process is created, so honoring "run as
+    // administrator" means handing the whole startup over to a fresh elevated
+    // copy - before either branch below builds anything. Both branches get it:
+    // tray mode is where key injection needs elevation most.
+    if elevate::wants_startup_elevation(&config) {
+        match elevate::relaunch_as_admin() {
+            Ok(()) => return Ok(()),
+            // Declining UAC leaves the app usable (and able to turn the setting
+            // back off) instead of refusing to start at all.
+            Err(elevate::ElevateError::Cancelled) => {}
+            Err(err) => dialog::warning(&format!(
+                "Could not start as administrator: {err}\n\n\
+                 Continuing without administrator rights."
+            )),
+        }
+    }
+
     // Launch options select tray mode: the window is constructed but stays
     // hidden until the tray icon asks for it.
     if let Some(options) = options {
@@ -57,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(app) => app,
             Err(err) => fatal(&format!("Could not create the window: {err}"), 1),
         };
-        if let Err(err) = background::run(app, &options, config::load_config()) {
+        if let Err(err) = background::run(app, &options, config) {
             fatal(&err.to_string(), 1);
         }
         return Ok(());
@@ -65,10 +85,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = create_window()?;
 
-    app_state::wire(&app, config::load_config());
+    app_state::wire(&app, config);
     gamepad::spawn_listener(app.as_weak());
+
+    let outcome = app.run();
+    drop(app);
+
+    elevate::finish_requested_restart();
 
     // Nothing outside this process has happened yet, so a renderer failure here
     // is always safe to restart from.
-    renderer::recover(app.run(), false)
+    renderer::recover(outcome, false)
 }

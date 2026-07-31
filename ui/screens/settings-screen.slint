@@ -8,6 +8,7 @@ component Pill inherits Rectangle {
     in property <bool> selected: false;
     // Gamepad-focus indicator: tints/bolds the label instead of a border ring.
     in property <bool> focused: false;
+    in property <bool> enabled: true;
     in property <length> min-w: 0px;
     callback clicked();
 
@@ -15,6 +16,7 @@ component Pill inherits Rectangle {
     border-width: 1px;
     border-color: selected ? Theme.accent : Theme.border;
     border-radius: 7px;
+    opacity: enabled ? 1.0 : 0.45;
     width: max(min-w, lay.min-width);
     height: lay.min-height;
 
@@ -35,6 +37,7 @@ component Pill inherits Rectangle {
     }
 
     TouchArea {
+        enabled: root.enabled;
         clicked => { root.clicked(); }
     }
 }
@@ -56,17 +59,23 @@ export component SettingsScreen inherits Rectangle {
     in property <string> default-shortcut-label;
     in-out property <bool> close-after-launch: true;
     in-out property <bool> confirm-exit: true;
+    in-out property <bool> run-as-admin: false;
+    // Whether *this* process is elevated, which is decided at startup and can't
+    // change while it runs - so the restart button is pointless once it's true.
+    in property <bool> is-elevated: false;
     // Gamepad focus target; -1 means nothing focused. Rows are: 0 trainer
     // folder, 1 default shortcut, 2 close-after-launch, 3 confirm-exit,
-    // 4 accent color, 5 background, 6 row style. Must stay in sync with
-    // AppWindow's settings-item-count()/activate-settings-focused()/
-    // move-settings-value, which drive this from D-Pad/A/B input (left/right
-    // cycle rows 4-6 in place rather than moving focus further).
+    // 4 run-as-admin, 5 restart-as-admin, 6 accent color, 7 background,
+    // 8 row style. Must stay in sync with AppWindow's settings-item-count()/
+    // activate-settings-focused()/move-settings-value, which drive this from
+    // D-Pad/A/B input (left/right cycle rows 6-8 in place rather than moving
+    // focus further).
     in property <int> focused-index: -1;
 
     callback back();
     callback browse-folder();
     callback record-default-shortcut();
+    callback restart-as-admin();
     // Theme changes go back up to AppWindow rather than writing the Theme
     // global here, so they can be persisted - see AppWindow.set-accent etc.
     callback set-accent(color);
@@ -253,6 +262,80 @@ export component SettingsScreen inherits Rectangle {
                                 checked <=> root.confirm-exit;
                             }
                         }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            cross-axis-alignment: center;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Run as administrator";
+                                    color: root.focused-index == 4 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 4 ? 800 : 600;
+                                }
+                                Text {
+                                    text: "Windows blocks key presses sent to an elevated trainer, so default cheats only reach one when this app is elevated too. Takes effect the next time the app starts.";
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            ToggleSwitch {
+                                track-width: 46px;
+                                track-height: 26px;
+                                checked <=> root.run-as-admin;
+                            }
+                        }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            cross-axis-alignment: center;
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Administrator rights";
+                                    color: root.focused-index == 5 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 5 ? 800 : 600;
+                                }
+                                Text {
+                                    text: root.is-elevated
+                                        ? "Already running as administrator."
+                                        : "Not running as administrator. Restarting closes this window and reopens it after a Windows confirmation prompt.";
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            Pill {
+                                label: root.is-elevated ? "Elevated" : "Restart as admin";
+                                min-w: 150px;
+                                enabled: !root.is-elevated;
+                                focused: root.focused-index == 5 && !root.is-elevated;
+                                clicked => { root.restart-as-admin(); }
+                            }
+                        }
                     }
                 }
 
@@ -284,9 +367,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Accent color";
-                                color: root.focused-index == 4 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 6 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 4 ? 800 : 600;
+                                font-weight: root.focused-index == 6 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -324,9 +407,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Background";
-                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 7 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 5 ? 800 : 600;
+                                font-weight: root.focused-index == 7 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -353,9 +436,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Row style";
-                                color: root.focused-index == 6 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 8 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 6 ? 800 : 600;
+                                font-weight: root.focused-index == 8 ? 800 : 600;
                             }
 
                             HorizontalLayout {

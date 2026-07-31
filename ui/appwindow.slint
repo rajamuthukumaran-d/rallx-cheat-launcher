@@ -34,6 +34,11 @@ export component AppWindow inherits Window {
     // Whether B on Home (with nothing else open) shows a confirmation before
     // quitting, or quits immediately. Toggle lives in Settings.
     in-out property <bool> confirm-exit: true;
+    // Persisted intent to start elevated; only takes effect on the next
+    // startup, since a running process's integrity level is fixed. is-elevated
+    // is what this process actually got, set once by Rust at wire-up.
+    in-out property <bool> run-as-admin: false;
+    in property <bool> is-elevated: false;
     in-out property <bool> show-quit-confirm: false;
     // Left/right position shared by the delete-confirm, key-recorder, and
     // quit-confirm popups' Cancel/Confirm button pair - they're mutually
@@ -136,12 +141,12 @@ export component AppWindow inherits Window {
     }
 
     // Keep in sync with SettingsScreen's control layout: trainer folder,
-    // default shortcut, close-after-launch, confirm-before-close, accent
-    // color, background, row style - each a single up/down stop; accent/
-    // background/row-style are then cycled in place with left/right (see
-    // move-settings-value).
+    // default shortcut, close-after-launch, confirm-before-close,
+    // run-as-admin, restart-as-admin, accent color, background, row style -
+    // each a single up/down stop; accent/background/row-style are then cycled
+    // in place with left/right (see move-settings-value).
     function settings-item-count() -> int {
-        return 7;
+        return 9;
     }
 
     // Slint's imperative `for` has no index binding (only the declarative
@@ -185,11 +190,11 @@ export component AppWindow inherits Window {
     }
 
     function move-settings-value(delta: int) {
-        if root.settings-focused-index == 4 {
+        if root.settings-focused-index == 6 {
             root.cycle-accent(delta);
-        } else if root.settings-focused-index == 5 {
+        } else if root.settings-focused-index == 7 {
             root.set-dark-theme(!Theme.dark);
-        } else if root.settings-focused-index == 6 {
+        } else if root.settings-focused-index == 8 {
             root.set-compact-rows(!Theme.compact);
         }
     }
@@ -199,6 +204,12 @@ export component AppWindow inherits Window {
             root.settings-focused-index = 0;
         } else {
             root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
+        }
+        // The restart-as-admin button (index 5) is disabled once the process is
+        // already elevated, so step over it instead of parking focus on a stop
+        // where A does nothing.
+        if root.settings-focused-index == 5 && root.is-elevated {
+            root.settings-focused-index = delta < 0 ? 4 : 6;
         }
     }
 
@@ -577,7 +588,7 @@ export component AppWindow inherits Window {
     }
 
     // Maps settings-focused-index to whichever control it represents. Rows
-    // 4-6 (accent/background/row-style) are cycled with left/right instead -
+    // 6-8 (accent/background/row-style) are cycled with left/right instead -
     // see move-settings-value - so A is a no-op there.
     function activate-settings-focused() {
         if root.settings-focused-index == 0 {
@@ -588,6 +599,10 @@ export component AppWindow inherits Window {
             root.close-after-launch = !root.close-after-launch;
         } else if root.settings-focused-index == 3 {
             root.confirm-exit = !root.confirm-exit;
+        } else if root.settings-focused-index == 4 {
+            root.run-as-admin = !root.run-as-admin;
+        } else if root.settings-focused-index == 5 && !root.is-elevated {
+            root.restart-as-admin();
         }
     }
 
@@ -767,6 +782,10 @@ export component AppWindow inherits Window {
     // controls or the gamepad path; app_state reads the current values back
     // off this window and writes them to config.json.
     callback settings-changed();
+    // Ends this process and starts an elevated copy in its place; app_state
+    // persists the pending settings first, since the new process reads them
+    // back off config.json.
+    callback restart-as-admin();
 
     Timer {
         interval: 1800ms;
@@ -847,11 +866,14 @@ export component AppWindow inherits Window {
             default-shortcut-label: root.default-shortcut-label;
             close-after-launch <=> root.close-after-launch;
             confirm-exit <=> root.confirm-exit;
+            run-as-admin <=> root.run-as-admin;
+            is-elevated: root.is-elevated;
             focused-index: root.settings-focused-index;
 
             back => { root.go-home(); }
             browse-folder => { root.browse-folder(); }
             record-default-shortcut => { root.start-default-shortcut-recording(); }
+            restart-as-admin => { root.restart-as-admin(); }
             set-accent(value) => { root.set-accent(value); }
             set-dark-theme(on) => { root.set-dark-theme(on); }
             set-compact-rows(on) => { root.set-compact-rows(on); }
@@ -927,10 +949,11 @@ export component AppWindow inherits Window {
     changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
     changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
 
-    // These three are mutated both by the Settings screen's own controls (via
-    // two-way bindings / the key recorder) and by the gamepad handlers above,
-    // so watching the property covers every path in one place.
+    // These are mutated both by the Settings screen's own controls (via two-way
+    // bindings / the key recorder) and by the gamepad handlers above, so
+    // watching the property covers every path in one place.
     changed close-after-launch => { root.settings-changed(); }
     changed confirm-exit => { root.settings-changed(); }
+    changed run-as-admin => { root.settings-changed(); }
     changed default-shortcut-label => { root.settings-changed(); }
 }

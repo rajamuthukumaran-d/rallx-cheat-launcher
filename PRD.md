@@ -28,6 +28,9 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
 - Theme will have accent, background and style
 - Option to close the app after launching trainer
+- Option to run as administrator, plus a button to restart into it right away
+    - Windows blocks injected key presses aimed at an elevated program, so default cheats only reach a trainer that needs admin rights when the app is elevated too
+    - A process cannot elevate itself, so the toggle applies at the next startup and the button relaunches the app through a UAC prompt; the button is disabled when the app is already elevated
 
 ## Add/Edit trainer popup:
 - This is a popup when a trainer is dragged into the app or pressed add icon from the home

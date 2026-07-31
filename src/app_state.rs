@@ -14,8 +14,8 @@ use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecMode
 
 use crate::config::{AppConfig, CheatConfig, TrainerConfig};
 use crate::{
-    clipboard, exe_icon, keys, launch_args, trainer, AppWindow, CheatEntry, Palette, Theme,
-    TrainerItem,
+    clipboard, elevate, exe_icon, keys, launch_args, trainer, AppWindow, CheatEntry, Palette,
+    Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -332,6 +332,7 @@ fn palette_accent(app: &AppWindow, (r, g, b): (u8, u8, u8)) -> Color {
 fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_close_after_launch(config.close_after_launch_global);
     app.set_confirm_exit(config.confirm_exit);
+    app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
             .default_shortcut
@@ -353,6 +354,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     let mut config = state.config.borrow_mut();
     config.close_after_launch_global = app.get_close_after_launch();
     config.confirm_exit = app.get_confirm_exit();
+    config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,
         combo => Some(combo.to_string()),
@@ -444,11 +446,35 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     };
     app.set_folder_path(folder_label.into());
     app.set_has_trainer_folder(trainer_folder.is_some());
+    // Fixed for the lifetime of the process, so it's read once rather than
+    // re-checked whenever Settings opens.
+    app.set_is_elevated(elevate::is_elevated());
     apply_settings_to_ui(app, &state.config.borrow());
 
     app.on_quit_app(|| {
         let _ = slint::quit_event_loop();
     });
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_restart_as_admin(move || {
+            let app = app_weak.unwrap();
+            if elevate::is_elevated() {
+                return;
+            }
+
+            // The elevated copy reads config.json on startup and this process
+            // is about to end, so anything still only in the UI is written now.
+            persist_settings_from_ui(&app, &state);
+
+            // The relaunch itself waits until the event loop has exited and the
+            // hotkey/tray singletons are released - see
+            // elevate::finish_requested_restart.
+            elevate::request_restart();
+            let _ = slint::quit_event_loop();
+        });
+    }
 
     {
         let app_weak = app.as_weak();
