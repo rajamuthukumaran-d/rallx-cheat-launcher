@@ -49,6 +49,7 @@ src/
   background.rs     # tray mode: option -> config resolution, hotkey/tray loop
   config.rs         # config.json schema + load/save
   trainer.rs        # trainer discovery, launch, file import
+  elevate.rs        # elevation check + relaunching the app itself via "runas"
   keys.rs           # key-combo parsing + SendInput injection
   hotkey.rs         # global hotkey registration/handling
   clipboard.rs      # Win32 clipboard write (copy launch script)
@@ -80,7 +81,9 @@ silently violate a requirement from another section.)
   gamepad mapping (A=launch, X=edit, Y=search, Select=delete w/ confirm,
   RB=copy launch script, Start=settings); "close after launching" checkbox.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
-  (accent/background/style), global "close app after launching trainer".
+  (accent/background/style), global "close app after launching trainer",
+  "run as administrator" (applied at next startup) plus a restart-elevated
+  button that is disabled once the process is already elevated.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
   (key/key-combo) entered via a record button that captures live key input.

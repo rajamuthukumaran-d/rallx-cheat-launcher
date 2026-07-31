@@ -13,7 +13,7 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use crate::config::AppConfig;
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
-use crate::{app_state, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
+use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
 
 /// Head start the trainer gets before the first cheat combo is injected -
 /// keystrokes sent while it is still initializing are dropped.
@@ -171,7 +171,7 @@ impl Drop for RunningGuard {
 fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode) {
     if plan.cheats.is_empty()
         || mode != trainer::LaunchMode::Elevated
-        || trainer::is_elevated()
+        || elevate::is_elevated()
         || UIPI_WARNED.swap(true, Ordering::SeqCst)
     {
         return;
@@ -181,8 +181,8 @@ fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode)
         "{} was launched with administrator rights, but Rallx Cheat Launcher is not.\n\n\
          Windows blocks key injection into an elevated program, so the default \
          cheats ({}) will not reach it.\n\n\
-         Start Rallx Cheat Launcher as administrator (right-click the shortcut or terminal -> \
-         Run as administrator) to make them work.",
+         Open Rallx Cheat Launcher from the tray and turn on Settings -> Run as \
+         administrator to make them work.",
         plan.filename,
         plan.cheats
             .iter()
@@ -330,6 +330,11 @@ pub fn run(
     drop(hotkey_manager);
     drop(tray);
     drop(app);
+
+    // Restarting elevated re-runs this function in a child process too, so it
+    // waits for the same drops before the child tries to take the hotkey and
+    // the tray icon over.
+    elevate::finish_requested_restart();
 
     // The no-hotkey arm above already asked for a launch, so that run must not
     // be restarted - it would launch a second copy.
