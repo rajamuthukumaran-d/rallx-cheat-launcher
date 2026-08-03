@@ -110,6 +110,7 @@ silently violate a requirement from another section.)
 
 ## Coding conventions
 
+- When creating Git commits, use conversation commits.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before
   considering a change done. Fix clippy warnings rather than allowing them,
   unless there's a specific documented reason not to.

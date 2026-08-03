@@ -47,6 +47,10 @@ export component TextField inherits Rectangle {
     }
 
     TouchArea {
-        clicked => { input.focus(); }
+        clicked => {
+            input.focus();
+            // Slint clamps selection offsets past the UTF-8 byte length to the end.
+            input.set-selection-offsets(2147483647, 2147483647);
+        }
     }
 }
