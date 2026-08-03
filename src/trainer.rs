@@ -154,7 +154,7 @@ fn read_shortcut(path: &Path) -> Result<(std::path::PathBuf, String), GameExeErr
         CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
-    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLR_NO_UI};
 
     fn err(e: windows::core::Error) -> GameExeError {
         GameExeError::UnreadableShortcut(e.message())
@@ -185,10 +185,17 @@ fn read_shortcut(path: &Path) -> Result<(std::path::PathBuf, String), GameExeErr
             )
             .map_err(err)?;
 
+            // GetPath does not run link tracking itself. Resolve first so a
+            // target that moved or was renamed can still be found, but never
+            // let the Shell put up a dialog over the trainer form.
+            link.Resolve(None, SLR_NO_UI.0 as u32).map_err(err)?;
+
             // MAX_PATH is what IShellLinkW documents for both buffers; a longer
             // target simply comes back truncated rather than overflowing.
             let mut target = [0u16; 260];
-            link.GetPath(&mut target, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32)
+            // Zero requests the normal resolved path. SLGP_RAWPATH would return
+            // a possibly nonexistent path with environment variables intact.
+            link.GetPath(&mut target, std::ptr::null_mut(), 0)
                 .map_err(err)?;
 
             let mut args = [0u16; 260];
