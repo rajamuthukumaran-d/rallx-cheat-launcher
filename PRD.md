@@ -49,6 +49,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
         - When the app launched with above launch option, the app UI doesn't show up instead it will open as a system tray icon (It will open in background)
         - When user hit insert, the app will launch the trainer rdr2-trainer.exe and programically press keys ctrl+num1, num3 and ctrl+num5
         - NOTE: rdr2-trainer.exe doesn't need the path, the app should launch the exe based on the selected path in the configuration as all the trainer reside inside single path
+        - Only --launch is required. Anything left out falls back to that trainer's own saved settings - its launch shortcut, then the global default shortcut, and its saved default cheats - so ```rallx-cheater.exe --launch="rdr2-trainer.exe"``` behaves the same as launching it from the Home screen. The other flags are per-run overrides of those saved values
+        - Passing --override turns the fallback off: the hotkey and cheats then come only from the command line, and a trainer with saved values contributes none of them. Use it to pin a script so editing the trainer later can't change what it does
     - When adding a trainer user can optinally configure hotkey to launch the trainer in the middle of the game
     - Can also configure default cheats from the trainer (By pressing keys and key combination programically)
 - Dragging and dropping a exe will show add trainer window and confirming will move that file inside the trainer folder

@@ -40,7 +40,13 @@ pub struct BackgroundPlan {
 
 /// Resolves launch options against config.json: unspecified values fall back to
 /// the trainer's own saved shortcut and cheats, then to the global default
-/// shortcut.
+/// shortcut. So `--launch` on its own reproduces what the Home screen's play
+/// button would do, and the other flags are per-run overrides.
+///
+/// `--override` suppresses those fallbacks, leaving the command line as the
+/// only source of the hotkey and cheats. The trainer folder is still read from
+/// config either way - there is no flag for it, and trainers are only ever
+/// resolved inside it.
 pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPlan, String> {
     let Some(folder) = config.trainer_folder.clone() else {
         return Err("no trainer folder is configured - open Rallx and pick one first".to_string());
@@ -84,11 +90,14 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
         return Err(format!("{filename} was not found in {}", folder.display()));
     }
 
-    let hotkey_source = options
-        .hotkey
-        .clone()
-        .or_else(|| saved.and_then(|entry| entry.launch_shortcut.clone()))
-        .or_else(|| config.default_shortcut.clone());
+    let hotkey_source = options.hotkey.clone().or_else(|| {
+        if options.override_saved {
+            return None;
+        }
+        saved
+            .and_then(|entry| entry.launch_shortcut.clone())
+            .or_else(|| config.default_shortcut.clone())
+    });
 
     let hotkey = match hotkey_source
         .as_deref()
@@ -103,6 +112,7 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
         Some(list) => {
             keys::parse_combo_list(list).map_err(|err| format!("--defaultcheat: {err}"))?
         }
+        None if options.override_saved => Vec::new(),
         None => saved
             .map(|entry| {
                 entry
@@ -383,6 +393,7 @@ mod tests {
                 version: "1.0".to_string(),
                 size_bytes: 3,
                 game_exe: None,
+                game_args: None,
                 launch_shortcut: Some("Insert".to_string()),
                 default_cheats: vec![
                     CheatConfig {
@@ -416,6 +427,7 @@ mod tests {
                 hotkey: Some("ctrl+num9".to_string()),
                 default_cheats: Some("num1,ctrl+num2".to_string()),
                 close_after_launch: true,
+                override_saved: false,
             },
             &config(folder.path()),
         )
@@ -440,6 +452,51 @@ mod tests {
         // Per-trainer close_after_launch only generates the CLI flag; it must
         // not switch the behavior on by itself.
         assert!(!plan.close_after_launch);
+    }
+
+    // --override is the escape hatch from the fallback above: the command line
+    // becomes the whole story, so a trainer with a saved shortcut and cheats
+    // contributes neither.
+    #[test]
+    fn override_ignores_the_saved_shortcut_and_cheats() {
+        let folder = TrainerFolder::new("override");
+        let plan = plan(
+            &LaunchOptions {
+                trainer: Some("rdr2-trainer.exe".to_string()),
+                override_saved: true,
+                ..LaunchOptions::default()
+            },
+            &config(folder.path()),
+        )
+        .unwrap();
+
+        assert_eq!(plan.hotkey, None);
+        assert!(plan.cheats.is_empty());
+        // Which file to launch is identity, not an option, so the entry is
+        // still what resolves the name for the tray.
+        assert_eq!(plan.filename, "rdr2-trainer.exe");
+        assert_eq!(plan.display_name, "RDR2");
+    }
+
+    // Under --override the global default shortcut is a saved value like any
+    // other, so it must not sneak back in as the last fallback.
+    #[test]
+    fn override_takes_only_what_the_command_line_gives() {
+        let folder = TrainerFolder::new("override-cli");
+        let plan = plan(
+            &LaunchOptions {
+                trainer: Some("rdr2-trainer.exe".to_string()),
+                default_cheats: Some("num5".to_string()),
+                override_saved: true,
+                ..LaunchOptions::default()
+            },
+            &config(folder.path()),
+        )
+        .unwrap();
+
+        assert_eq!(plan.hotkey, None);
+        let cheats: Vec<String> = plan.cheats.iter().map(KeyCombo::canonical).collect();
+        assert_eq!(cheats, ["Numpad5"]);
     }
 
     #[test]

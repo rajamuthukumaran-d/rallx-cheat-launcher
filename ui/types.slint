@@ -10,6 +10,12 @@ export struct TrainerItem {
     version: string,
     size: string,
     exe: string,
+    // Absolute path of the game this trainer is for, or empty when unset. Full
+    // path rather than a filename because the game lives wherever it was
+    // installed, never in the trainer folder.
+    game-exe: string,
+    // Command line the generated .bat starts game-exe with, or empty.
+    game-args: string,
     shortcut: string,
     color: color,
     letter: string,

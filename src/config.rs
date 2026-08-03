@@ -123,6 +123,11 @@ pub struct TrainerConfig {
     pub version: String,
     pub size_bytes: u64,
     pub game_exe: Option<String>,
+    /// Command line to start `game_exe` with, as taken from a picked .lnk or
+    /// typed by hand. Only ever written into a generated .bat - Rallx itself
+    /// never starts the game. `default` because configs predate the field.
+    #[serde(default)]
+    pub game_args: Option<String>,
     pub launch_shortcut: Option<String>,
     pub default_cheats: Vec<CheatConfig>,
     pub close_after_launch: bool,
