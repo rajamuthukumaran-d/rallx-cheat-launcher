@@ -17,7 +17,7 @@ use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, T
 
 /// Head start the trainer gets before the first cheat combo is injected -
 /// keystrokes sent while it is still initializing are dropped.
-const LAUNCH_SETTLE: Duration = Duration::from_millis(1000);
+const LAUNCH_SETTLE: Duration = Duration::from_secs(5);
 
 /// Gap between consecutive cheat combos. Trainers debounce their own hotkeys,
 /// so back-to-back combos would register as one.
