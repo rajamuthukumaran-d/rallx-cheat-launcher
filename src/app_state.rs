@@ -109,15 +109,20 @@ fn config_to_trainer_item(
         .iter()
         .map(|cheat| {
             let key = if cheat.key.is_empty() {
-                NOT_SET
+                NOT_SET.to_string()
             } else {
-                &cheat.key
+                keys::format_combo_for_display(&cheat.key)
             };
-            make_cheat(state, &cheat.label, key)
+            make_cheat(state, &cheat.label, &key)
         })
         .collect();
     let icon = exe_path.and_then(exe_icon::extract_icon);
     let size = format_size(cfg.size_bytes);
+    let shortcut = cfg
+        .launch_shortcut
+        .as_deref()
+        .map(keys::format_combo_for_display)
+        .unwrap_or_else(|| NOT_SET.to_string());
     make_trainer(
         state,
         NewTrainer {
@@ -127,7 +132,7 @@ fn config_to_trainer_item(
             exe: &cfg.filename,
             game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
             game_args: cfg.game_args.as_deref().unwrap_or_default(),
-            shortcut: cfg.launch_shortcut.as_deref().unwrap_or(NOT_SET),
+            shortcut: &shortcut,
             cheats,
             icon,
         },
@@ -351,7 +356,7 @@ fn apply_form_to_config(
 ) {
     let launch_shortcut = match shortcut.trim() {
         "" | NOT_SET => None,
-        combo => Some(combo.to_string()),
+        combo => Some(keys::canonicalize_combo(combo)),
     };
     let game_exe = match game_exe.trim() {
         "" | NO_GAME_PLACEHOLDER => None,
@@ -370,7 +375,7 @@ fn apply_form_to_config(
             label: cheat.label.to_string(),
             key: match cheat.key.as_str() {
                 NOT_SET => String::new(),
-                key => key.to_string(),
+                key => keys::canonicalize_combo(key),
             },
         })
         .collect();
@@ -421,8 +426,8 @@ fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
         config
             .default_shortcut
             .as_deref()
-            .unwrap_or(NOT_SET)
-            .to_string()
+            .map(keys::format_combo_for_display)
+            .unwrap_or_else(|| NOT_SET.to_string())
             .into(),
     );
 
@@ -441,7 +446,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,
-        combo => Some(combo.to_string()),
+        combo => Some(keys::canonicalize_combo(combo)),
     };
 
     let theme = app.global::<Theme>();

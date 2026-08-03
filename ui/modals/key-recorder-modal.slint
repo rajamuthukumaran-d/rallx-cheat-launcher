@@ -1,12 +1,9 @@
 import { Theme } from "../theme.slint";
 import { ModalBackdrop } from "../components/modal-backdrop.slint";
 
-// Note: Slint's FocusScope reports *logical* keys (the character produced), the
-// same model browsers use for KeyboardEvent.key. There is no physical-scancode
-// equivalent exposed here, so a numpad digit and its top-row twin are
-// indistinguishable at this layer (both simply produce text "1"). That's a
-// known boundary of this UI-only pass — real OS-level scancode capture belongs
-// to the future hotkey.rs/global-hotkey integration, not this prototype.
+// Ordinary keys are captured here. Physical numpad keys are intercepted by the
+// Win32 window subclass first because Slint reports their logical text, which
+// is indistinguishable from the top-row equivalent.
 export component KeyRecorderModal inherits ModalBackdrop {
     in-out property <string> recorded-combo: "";
     // Gamepad left/right focus between the two buttons below; true = Confirm

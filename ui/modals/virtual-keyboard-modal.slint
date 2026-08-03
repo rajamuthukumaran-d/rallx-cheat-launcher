@@ -58,6 +58,7 @@ component Key inherits Rectangle {
 export component VirtualKeyboardModal inherits ModalBackdrop {
     in property <string> preview: "";
     in property <bool> shift: false;
+    in property <bool> numpad: false;
     in property <int> focused-row: 0;
     in property <int> focused-col: 0;
 
@@ -72,6 +73,8 @@ export component VirtualKeyboardModal inherits ModalBackdrop {
         if (key == "SPACE") { return "Space"; }
         if (key == "DONE") { return "Done"; }
         if (key == "SHIFT") { return "⇧"; }
+        if (key == "NUMPAD") { return "123"; }
+        if (key == "ABC") { return "ABC"; }
         return root.shift ? key.to-uppercase() : key;
     }
 
@@ -110,16 +113,36 @@ export component VirtualKeyboardModal inherits ModalBackdrop {
                 overflow: elide;
             }
 
-            for row[r] in KeyboardLayout.rows: HorizontalLayout {
-                spacing: 6px;
-                alignment: center;
+            if !root.numpad: VerticalLayout {
+                spacing: 14px;
 
-                for key[c] in row: Key {
-                    label: root.key-label(key);
-                    wide: key == "SPACE" || key == "SHIFT" || key == "BACK" || key == "DONE";
-                    active: key == "SHIFT" && root.shift;
-                    focused: r == root.focused-row && c == root.focused-col;
-                    clicked => { root.key-tapped(r, c); }
+                for row[r] in KeyboardLayout.rows: HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    for key[c] in row: Key {
+                        label: root.key-label(key);
+                        wide: key == "SPACE" || key == "SHIFT" || key == "BACK" || key == "DONE" || key == "NUMPAD";
+                        active: key == "SHIFT" && root.shift;
+                        focused: r == root.focused-row && c == root.focused-col;
+                        clicked => { root.key-tapped(r, c); }
+                    }
+                }
+            }
+
+            if root.numpad: VerticalLayout {
+                spacing: 8px;
+
+                for row[r] in KeyboardLayout.numpad-rows: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+
+                    for key[c] in row: Key {
+                        label: root.key-label(key);
+                        wide: key == "BACK" || key == "DONE" || key == "ABC";
+                        focused: r == root.focused-row && c == root.focused-col;
+                        clicked => { root.key-tapped(r, c); }
+                    }
                 }
             }
 
