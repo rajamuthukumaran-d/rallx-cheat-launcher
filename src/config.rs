@@ -35,6 +35,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_launch_shortcut() -> Option<String> {
+    Some("Ctrl+Alt+Shift+F3".to_string())
+}
+
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
@@ -137,7 +141,7 @@ pub struct TrainerConfig {
 pub struct AppConfig {
     #[serde(default)]
     pub trainer_folder: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default = "default_launch_shortcut")]
     pub default_shortcut: Option<String>,
     #[serde(default)]
     pub theme: ThemeConfig,
@@ -158,7 +162,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             trainer_folder: None,
-            default_shortcut: None,
+            default_shortcut: default_launch_shortcut(),
             theme: ThemeConfig::default(),
             close_after_launch_global: true,
             confirm_exit: true,
@@ -183,7 +187,10 @@ pub fn get_config_path() -> PathBuf {
 pub fn load_config() -> AppConfig {
     let config_path = get_config_path();
     if let Ok(content) = fs::read_to_string(&config_path) {
-        if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+        if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
+            if config.default_shortcut.is_none() {
+                config.default_shortcut = default_launch_shortcut();
+            }
             return config;
         }
     }
@@ -245,6 +252,10 @@ mod tests {
         assert_eq!(config.trainer_folder, Some(PathBuf::from("C:\\trainers")));
         assert!(config.close_after_launch_global);
         assert!(config.confirm_exit);
+        assert_eq!(
+            config.default_shortcut.as_deref(),
+            Some("Ctrl+Alt+Shift+F3")
+        );
         // Elevation is opt-in, so a config written before the setting existed
         // must not start prompting for UAC on the next launch.
         assert!(!config.run_as_admin);

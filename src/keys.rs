@@ -257,13 +257,16 @@ pub fn parse_combo(combo: &str) -> Result<KeyCombo, KeyParseError> {
 
     let mut modifiers = Modifiers::default();
     let mut key = None;
+    let tokens: Vec<_> = combo
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect();
+    let has_trailing_plus = combo.trim_end().ends_with('+');
 
-    for token in combo.split('+') {
-        let token = token.trim();
-        if token.is_empty() {
-            continue;
-        }
-        match normalize(token).as_str() {
+    for (index, token) in tokens.iter().enumerate() {
+        let normalized = normalize(token);
+        match normalized.as_str() {
             "CTRL" | "CONTROL" => modifiers.ctrl = true,
             "ALT" | "OPTION" => modifiers.alt = true,
             "SHIFT" => modifiers.shift = true,
@@ -272,7 +275,13 @@ pub fn parse_combo(combo: &str) -> Result<KeyCombo, KeyParseError> {
                 if key.is_some() {
                     return Err(KeyParseError::MultipleKeys(combo.trim().to_string()));
                 }
-                key = Some(parse_key(token)?);
+                key = Some(
+                    if has_trailing_plus && index + 1 == tokens.len() && normalized == "NUMPAD" {
+                        parse_key("NumpadAdd")?
+                    } else {
+                        parse_key(token)?
+                    },
+                );
             }
         }
     }
@@ -311,6 +320,34 @@ impl KeyCombo {
         out
     }
 
+    pub fn display(&self) -> String {
+        let mut parts = Vec::new();
+        for (active, name) in [
+            (self.modifiers.ctrl, "Ctrl"),
+            (self.modifiers.alt, "Alt"),
+            (self.modifiers.shift, "Shift"),
+            (self.modifiers.win, "Meta"),
+        ] {
+            if active {
+                parts.push(name.to_string());
+            }
+        }
+
+        let key = match self.key.name {
+            "NumpadAdd" => "Numpad +".to_string(),
+            "NumpadSubtract" => "Numpad -".to_string(),
+            "NumpadMultiply" => "Numpad *".to_string(),
+            "NumpadDivide" => "Numpad /".to_string(),
+            "NumpadDecimal" => "Numpad .".to_string(),
+            "NumpadEnter" => "Numpad Enter".to_string(),
+            name if name.starts_with("Numpad") => name.replacen("Numpad", "Numpad ", 1),
+            name if name.starts_with("Digit") => name.trim_start_matches("Digit").to_string(),
+            name => name.to_string(),
+        };
+        parts.push(key);
+        parts.join(" + ")
+    }
+
     fn modifier_vks(&self) -> Vec<u16> {
         let mut vks = Vec::new();
         if self.modifiers.ctrl {
@@ -327,6 +364,18 @@ impl KeyCombo {
         }
         vks
     }
+}
+
+pub fn format_combo_for_display(combo: &str) -> String {
+    parse_combo(combo)
+        .map(|combo| combo.display())
+        .unwrap_or_else(|_| combo.to_string())
+}
+
+pub fn canonicalize_combo(combo: &str) -> String {
+    parse_combo(combo)
+        .map(|combo| combo.canonical())
+        .unwrap_or_else(|_| combo.to_string())
 }
 
 impl fmt::Display for KeyCombo {
@@ -501,5 +550,23 @@ mod tests {
         let combos = parse_combo_list("ctrl+num1,num3, ctrl+num5 ,").unwrap();
         let names: Vec<String> = combos.iter().map(KeyCombo::canonical).collect();
         assert_eq!(names, ["Ctrl+Numpad1", "Numpad3", "Ctrl+Numpad5"]);
+    }
+
+    #[test]
+    fn numpad_combos_have_distinct_human_readable_labels() {
+        assert_eq!(format_combo_for_display("Ctrl+Numpad1"), "Ctrl + Numpad 1");
+        assert_eq!(format_combo_for_display("NumpadAdd"), "Numpad +");
+        assert_eq!(canonicalize_combo("Ctrl + Numpad 1"), "Ctrl+Numpad1");
+        assert_eq!(format_combo_for_display("Digit1"), "1");
+    }
+
+    #[test]
+    fn numpad_add_display_labels_round_trip_to_canonical_form() {
+        assert_eq!(canonicalize_combo("Numpad +"), "NumpadAdd");
+        assert_eq!(canonicalize_combo("Ctrl + Numpad +"), "Ctrl+NumpadAdd");
+        assert_eq!(
+            canonicalize_combo(&format_combo_for_display("Alt+NumpadAdd")),
+            "Alt+NumpadAdd"
+        );
     }
 }

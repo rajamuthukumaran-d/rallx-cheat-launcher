@@ -110,6 +110,13 @@ silently violate a requirement from another section.)
 
 ## Coding conventions
 
+- All Git commit messages, including commits created through Codex's Commit or
+  Commit and Push actions, must follow Conventional Commits. Use the format
+  `type(scope): description` (scope is optional), with one of `feat`, `fix`,
+  `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`, or `revert`.
+  Keep the description imperative and lowercase, for example
+  `fix(ui): place the text cursor at the clicked position`. Never use a plain
+  descriptive message that omits the Conventional Commit type.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before
   considering a change done. Fix clippy warnings rather than allowing them,
   unless there's a specific documented reason not to.

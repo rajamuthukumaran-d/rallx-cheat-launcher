@@ -18,6 +18,7 @@ mod exe_icon;
 mod exe_version;
 mod gamepad;
 mod hotkey;
+mod key_capture;
 mod keys;
 mod launch_args;
 mod renderer;
@@ -74,6 +75,24 @@ fn on_exe_dropped(app_weak: slint::Weak<AppWindow>) -> impl Fn(dragdrop::Drop) +
     }
 }
 
+fn on_numpad_pressed(app_weak: slint::Weak<AppWindow>) -> impl Fn(String) -> bool + 'static {
+    move |combo| {
+        let Some(app) = app_weak.upgrade() else {
+            return false;
+        };
+        if !app.get_recording() {
+            return false;
+        }
+        let app_weak = app_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_recorded_combo(keys::format_combo_for_display(&combo).into());
+            }
+        });
+        true
+    }
+}
+
 /// Installs the file-drop handler once the window it needs actually exists.
 ///
 /// `show()` doesn't get us there: Slint creates the native window (and with it
@@ -108,6 +127,35 @@ fn enable_drag_drop(app: &AppWindow) {
             }
             Err(err) => {
                 eprintln!("Drag and drop unavailable: {err}");
+                handle.stop();
+            }
+        }
+    });
+}
+
+/// Installs physical numpad capture once Slint has created the HWND.
+fn enable_key_capture(app: &AppWindow) {
+    const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    const MAX_ATTEMPTS: u32 = 40;
+
+    let app_weak = app.as_weak();
+    let attempts = std::cell::Cell::new(0u32);
+    let timer = std::rc::Rc::new(slint::Timer::default());
+    let handle = timer.clone();
+
+    timer.start(slint::TimerMode::Repeated, RETRY_INTERVAL, move || {
+        let Some(app) = app_weak.upgrade() else {
+            handle.stop();
+            return;
+        };
+
+        match key_capture::enable(app.window(), on_numpad_pressed(app.as_weak())) {
+            Ok(()) => handle.stop(),
+            Err(key_capture::KeyCaptureError::NoWindowHandle) if attempts.get() < MAX_ATTEMPTS => {
+                attempts.set(attempts.get() + 1);
+            }
+            Err(err) => {
+                eprintln!("Physical numpad capture unavailable: {err}");
                 handle.stop();
             }
         }
@@ -164,6 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let outcome = match app.show() {
         Ok(()) => {
             enable_drag_drop(&app);
+            enable_key_capture(&app);
             slint::run_event_loop()
         }
         Err(err) => Err(err),

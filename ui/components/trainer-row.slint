@@ -10,7 +10,6 @@ export component TrainerRow inherits Rectangle {
     callback launch();
     callback edit();
     callback delete();
-    callback copy();
     callback select();
 
     // ListView only permits a single `for` as its direct child, so row-to-row
@@ -100,14 +99,6 @@ export component TrainerRow inherits Rectangle {
                 alignment: end;
                 cross-axis-alignment: center;
 
-                IconButton {
-                    icon: @image-url("../../assets/images/icons/copy.svg");
-                    icon-size: 17px;
-                    button-size: 38px;
-                    icon-color: Theme.text-dim;
-                    tooltip-text: "Copy launch script";
-                    clicked => { root.copy(); }
-                }
                 IconButton {
                     icon: @image-url("../../assets/images/icons/edit.svg");
                     icon-size: 17px;

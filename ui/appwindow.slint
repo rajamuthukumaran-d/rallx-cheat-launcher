@@ -126,6 +126,7 @@ export component AppWindow inherits Window {
     in-out property <int> keyboard-cheat-id: -1;
     in-out property <string> keyboard-preview: "";
     in-out property <bool> keyboard-shift: false;
+    in-out property <bool> keyboard-numpad: false;
     in-out property <int> keyboard-row: 0;
     in-out property <int> keyboard-col: 0;
 
@@ -328,12 +329,26 @@ export component AppWindow inherits Window {
     }
 
     function move-keyboard-vertical(delta: int) {
-        root.keyboard-row = max(0, min(root.keyboard-row + delta, KeyboardLayout.rows.length - 1));
-        root.keyboard-col = min(root.keyboard-col, KeyboardLayout.rows[root.keyboard-row].length - 1);
+        root.keyboard-row = max(0, min(root.keyboard-row + delta, root.keyboard-row-count() - 1));
+        root.keyboard-col = min(root.keyboard-col, root.keyboard-col-count(root.keyboard-row) - 1);
     }
 
     function move-keyboard-horizontal(delta: int) {
-        root.keyboard-col = max(0, min(root.keyboard-col + delta, KeyboardLayout.rows[root.keyboard-row].length - 1));
+        root.keyboard-col = max(0, min(root.keyboard-col + delta, root.keyboard-col-count(root.keyboard-row) - 1));
+    }
+
+    function keyboard-row-count() -> int {
+        return root.keyboard-numpad ? KeyboardLayout.numpad-rows.length : KeyboardLayout.rows.length;
+    }
+
+    function keyboard-col-count(row: int) -> int {
+        return root.keyboard-numpad ? KeyboardLayout.numpad-rows[row].length : KeyboardLayout.rows[row].length;
+    }
+
+    function keyboard-key() -> string {
+        return root.keyboard-numpad
+            ? KeyboardLayout.numpad-rows[root.keyboard-row][root.keyboard-col]
+            : KeyboardLayout.rows[root.keyboard-row][root.keyboard-col];
     }
 
     // Left/right: cycles the focused settings row's value, moves between
@@ -549,6 +564,7 @@ export component AppWindow inherits Window {
         root.keyboard-row = 0;
         root.keyboard-col = 0;
         root.keyboard-shift = false;
+        root.keyboard-numpad = false;
         root.show-keyboard = true;
     }
 
@@ -578,24 +594,32 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Maps (keyboard-row, keyboard-col) to whichever key it represents, per
-    // KeyboardLayout.rows; must stay in sync with VirtualKeyboardModal's
+    // Maps (keyboard-row, keyboard-col) to whichever key it represents in the
+    // active KeyboardLayout grid; must stay in sync with VirtualKeyboardModal's
     // rendering. keyboard-char/keyboard-backspace are handled in Rust, which
     // owns the actual string editing and writes the result back to whichever
     // field keyboard-target names.
     function activate-keyboard-key() {
-        if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SHIFT" {
+        if root.keyboard-key() == "SHIFT" {
             root.keyboard-shift = !root.keyboard-shift;
-        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "BACK" {
+        } else if root.keyboard-key() == "BACK" {
             root.keyboard-backspace();
-        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "SPACE" {
+        } else if root.keyboard-key() == "SPACE" {
             root.keyboard-char(" ");
-        } else if KeyboardLayout.rows[root.keyboard-row][root.keyboard-col] == "DONE" {
+        } else if root.keyboard-key() == "DONE" {
             root.close-keyboard();
+        } else if root.keyboard-key() == "NUMPAD" {
+            root.keyboard-numpad = true;
+            root.keyboard-row = 0;
+            root.keyboard-col = 0;
+        } else if root.keyboard-key() == "ABC" {
+            root.keyboard-numpad = false;
+            root.keyboard-row = 0;
+            root.keyboard-col = 0;
         } else if root.keyboard-shift {
-            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col].to-uppercase());
+            root.keyboard-char(root.keyboard-key().to-uppercase());
         } else {
-            root.keyboard-char(KeyboardLayout.rows[root.keyboard-row][root.keyboard-col]);
+            root.keyboard-char(root.keyboard-key());
         }
     }
 
@@ -955,7 +979,6 @@ export component AppWindow inherits Window {
             launch-trainer(id) => { root.launch-trainer(id); }
             edit-trainer(id) => { root.open-edit(id); }
             delete-trainer(id) => { root.request-delete(id); }
-            copy-trainer(id) => { root.copy-script(id); }
             search-changed(q) => { root.search-changed(q); }
         }
 
@@ -1009,6 +1032,7 @@ export component AppWindow inherits Window {
             show-exe-field: root.form-exe-field-visible();
             game-expanded: root.form-game-expanded;
             can-generate-bat: root.form-can-generate-bat();
+            edit-mode: root.editing-id >= 0;
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
@@ -1023,6 +1047,7 @@ export component AppWindow inherits Window {
             remove-cheat(id) => { root.remove-cheat-row(id); }
             cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
             record-cheat(id) => { root.start-cheat-recording(id); }
+            copy-script => { root.copy-script(root.editing-id); }
             cancel => { root.cancel-form(); }
             save => { root.save-form(); }
         }
@@ -1037,6 +1062,7 @@ export component AppWindow inherits Window {
         if root.show-keyboard: VirtualKeyboardModal {
             preview: root.keyboard-preview;
             shift: root.keyboard-shift;
+            numpad: root.keyboard-numpad;
             focused-row: root.keyboard-row;
             focused-col: root.keyboard-col;
 

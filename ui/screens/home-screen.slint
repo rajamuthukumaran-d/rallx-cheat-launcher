@@ -35,7 +35,6 @@ export component HomeScreen inherits Rectangle {
     callback launch-trainer(int);
     callback edit-trainer(int);
     callback delete-trainer(int);
-    callback copy-trainer(int);
     callback search-changed(string);
 
     background: Theme.bg;
@@ -361,7 +360,6 @@ export component HomeScreen inherits Rectangle {
                             launch => { root.launch-trainer(t.id); }
                             edit => { root.edit-trainer(t.id); }
                             delete => { root.delete-trainer(t.id); }
-                            copy => { root.copy-trainer(t.id); }
                             select => { root.focused-index = i; }
                         }
                     }

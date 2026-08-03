@@ -1,14 +1,20 @@
 // Single source of truth for the on-screen keyboard's key grid, shared by
 // AppWindow (gamepad navigation/activation) and VirtualKeyboardModal
-// (rendering), so the two can never drift out of sync. "SHIFT", "BACK",
-// "SPACE" and "DONE" are special tokens; every other entry is a literal
-// lowercase character to insert (uppercased on render/insert when shift is on).
+// (rendering), so the two can never drift out of sync. Uppercase entries are
+// special tokens; every other entry is a literal character to insert.
 export global KeyboardLayout {
     out property <[[string]]> rows: [
         ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
         ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
         ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
         ["SHIFT", "z", "x", "c", "v", "b", "n", "m", "BACK"],
-        ["SPACE", "DONE"],
+        ["SPACE", "NUMPAD", "DONE"],
+    ];
+    out property <[[string]]> numpad-rows: [
+        ["7", "8", "9", "/"],
+        ["4", "5", "6", "*"],
+        ["1", "2", "3", "-"],
+        ["0", ".", "+", "BACK"],
+        ["ABC", "DONE"],
     ];
 }
