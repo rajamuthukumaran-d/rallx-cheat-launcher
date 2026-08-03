@@ -946,22 +946,22 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         app.on_generate_game_bat(move || {
             let app = app_weak.unwrap();
 
-            // The .bat only ever needs the trainer's filename. While adding,
-            // the exe is still sitting wherever it was picked from and only
-            // moves into the trainer folder on save - but it keeps its name, so
-            // the reference is already correct.
             let editing_id = app.get_editing_id();
-            let trainer_filename = if editing_id < 0 {
-                Path::new(&app.get_form_exe_path().to_string())
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            } else {
-                match find_trainer(&state, editing_id) {
-                    Some(item) => item.exe.to_string(),
-                    None => return,
-                }
+            if editing_id < 0 {
+                show_toast(&app, "Save the trainer before generating its .bat file");
+                return;
+            }
+            let Some(item) = find_trainer(&state, editing_id) else {
+                return;
             };
+            let trainer_filename = item.exe.to_string();
+            let close_after_launch = state
+                .config
+                .borrow()
+                .trainers
+                .iter()
+                .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer_filename))
+                .is_some_and(|entry| entry.close_after_launch);
 
             let launcher = match std::env::current_exe() {
                 Ok(path) => path,
@@ -976,6 +976,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 app.get_form_game_args().as_ref(),
                 &launcher,
                 &trainer_filename,
+                close_after_launch,
             ) {
                 Ok(path) => show_toast(
                     &app,

@@ -195,6 +195,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     // needs no game configured, so the section is opt-in rather than four rows
     // of empty fields between Name and the shortcut.
     in property <bool> game-expanded: false;
+    in property <bool> can-generate-bat: false;
     // The trainer executable is only pickable when adding - an existing
     // trainer's exe is the file it was imported as, so editing hides the
     // field rather than offering a swap. Focus indices below stay unchanged
@@ -422,12 +423,15 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 alignment: start;
                                 ActionButton {
                                     label: "Generate .bat";
+                                    enabled: root.can-generate-bat;
                                     highlighted: root.focused-index == 5;
                                     clicked => { root.generate-bat(); }
                                 }
                             }
                             Text {
-                                text: "Writes a .bat next to the game, named after it, that starts the game with the options above and then this trainer in background mode.";
+                                text: root.can-generate-bat
+                                    ? "Writes a .bat next to the game, named after it, that starts the game with the options above and then this trainer in background mode."
+                                    : "Save the trainer before generating its .bat file.";
                                 color: Theme.text-dim;
                                 font-size: 12px;
                                 wrap: word-wrap;

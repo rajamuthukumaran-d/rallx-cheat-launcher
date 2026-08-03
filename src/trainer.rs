@@ -261,11 +261,17 @@ pub fn build_game_bat(
     game_args: &str,
     launcher_exe: &Path,
     trainer_filename: &str,
+    close_after_launch: bool,
 ) -> String {
     let game = bat_escape(&game_exe.display().to_string());
     let args = bat_escape(game_args.trim());
     let launcher = bat_escape(&launcher_exe.display().to_string());
     let trainer = bat_escape(trainer_filename);
+    let close_flag = if close_after_launch {
+        " --closeafterlaunch"
+    } else {
+        ""
+    };
 
     let game_line = if args.is_empty() {
         format!("start \"\" \"{game}\"")
@@ -277,14 +283,15 @@ pub fn build_game_bat(
     // title, and `cd /d "%~dp0"` so the game gets its own folder as the working
     // directory however the .bat itself was invoked.
     //
-    // Only --launch is passed: background mode falls back to the trainer's own
-    // saved shortcut and cheats, so the .bat keeps working after they're edited.
+    // Shortcut and cheat flags are omitted so background mode falls back to the
+    // trainer's saved values. The per-trainer close flag is different: its only
+    // purpose is to generate --closeafterlaunch, so it must be emitted here.
     format!(
         "{BAT_MARKER}\r\n\
          @echo off\r\n\
          cd /d \"%~dp0\"\r\n\
          {game_line}\r\n\
-         start \"\" \"{launcher}\" --launch=\"{trainer}\"\r\n"
+         start \"\" \"{launcher}\" --launch=\"{trainer}\"{close_flag}\r\n"
     )
 }
 
@@ -295,6 +302,7 @@ pub fn generate_game_bat(
     game_args: &str,
     launcher_exe: &Path,
     trainer_filename: &str,
+    close_after_launch: bool,
 ) -> Result<std::path::PathBuf, BatError> {
     if game_exe.as_os_str().is_empty() {
         return Err(BatError::NoGameExe);
@@ -310,15 +318,24 @@ pub fn generate_game_bat(
     let folder = game_exe.parent().ok_or(BatError::NoGameExe)?;
     let dest = folder.join(format!("{stem}.bat"));
 
-    if let Ok(existing) = std::fs::read_to_string(&dest) {
-        if !existing.starts_with(BAT_MARKER) {
+    match std::fs::read(&dest) {
+        Ok(existing) if !existing.starts_with(BAT_MARKER.as_bytes()) => {
             return Err(BatError::WouldOverwrite(format!("{stem}.bat")));
         }
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(BatError::Io(err)),
     }
 
     std::fs::write(
         &dest,
-        build_game_bat(game_exe, game_args, launcher_exe, trainer_filename),
+        build_game_bat(
+            game_exe,
+            game_args,
+            launcher_exe,
+            trainer_filename,
+            close_after_launch,
+        ),
     )?;
     Ok(dest)
 }
@@ -554,6 +571,7 @@ mod tests {
             "-dx12 -windowed",
             Path::new("C:\\Rallx\\rallx-cheat-launcher.exe"),
             "rdr2-trainer.exe",
+            true,
         );
 
         let lines: Vec<&str> = bat.lines().collect();
@@ -565,7 +583,7 @@ mod tests {
         );
         assert_eq!(
             lines[4],
-            "start \"\" \"C:\\Rallx\\rallx-cheat-launcher.exe\" --launch=\"rdr2-trainer.exe\""
+            "start \"\" \"C:\\Rallx\\rallx-cheat-launcher.exe\" --launch=\"rdr2-trainer.exe\" --closeafterlaunch"
         );
     }
 
@@ -576,10 +594,12 @@ mod tests {
             "   ",
             Path::new("rallx.exe"),
             "t.exe",
+            false,
         );
 
         let lines: Vec<&str> = bat.lines().collect();
         assert_eq!(lines[3], "start \"\" \"C:\\100%%%% Games\\g.exe\"");
+        assert!(!bat.contains("--closeafterlaunch"));
     }
 
     #[test]
@@ -592,14 +612,26 @@ mod tests {
             "-dx11",
             Path::new("rallx.exe"),
             "t.exe",
+            false,
         )
         .unwrap();
-        let regenerated =
-            generate_game_bat(&dir.join("Game.exe"), "", Path::new("rallx.exe"), "t.exe");
+        let regenerated = generate_game_bat(
+            &dir.join("Game.exe"),
+            "",
+            Path::new("rallx.exe"),
+            "t.exe",
+            false,
+        );
 
         // A .bat the user already had under that name is never overwritten.
         std::fs::write(dir.join("Game.bat"), "echo mine\r\n").unwrap();
-        let foreign = generate_game_bat(&dir.join("Game.exe"), "", Path::new("rallx.exe"), "t.exe");
+        let foreign = generate_game_bat(
+            &dir.join("Game.exe"),
+            "",
+            Path::new("rallx.exe"),
+            "t.exe",
+            false,
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
 
@@ -609,9 +641,32 @@ mod tests {
     }
 
     #[test]
+    fn generate_game_bat_wont_clobber_a_non_utf8_foreign_file() {
+        let dir = scratch("bat-non-utf8");
+        write_exe(&dir, "Game.exe", b"abc");
+        let dest = dir.join("Game.bat");
+        let original = b"echo mine\r\n\xff";
+        std::fs::write(&dest, original).unwrap();
+
+        let result = generate_game_bat(
+            &dir.join("Game.exe"),
+            "",
+            Path::new("rallx.exe"),
+            "t.exe",
+            false,
+        );
+        let contents = std::fs::read(&dest).unwrap();
+
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(matches!(result, Err(BatError::WouldOverwrite(name)) if name == "Game.bat"));
+        assert_eq!(contents, original);
+    }
+
+    #[test]
     fn generate_game_bat_needs_both_a_game_and_a_trainer() {
         assert!(matches!(
-            generate_game_bat(Path::new(""), "", Path::new("rallx.exe"), "t.exe"),
+            generate_game_bat(Path::new(""), "", Path::new("rallx.exe"), "t.exe", false),
             Err(BatError::NoGameExe)
         ));
         assert!(matches!(
@@ -619,7 +674,8 @@ mod tests {
                 Path::new("C:\\g\\game.exe"),
                 "",
                 Path::new("rallx.exe"),
-                "  "
+                "  ",
+                false,
             ),
             Err(BatError::NoTrainer)
         ));

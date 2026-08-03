@@ -244,6 +244,18 @@ export component AppWindow inherits Window {
         return root.editing-id < 0;
     }
 
+    function form-can-generate-bat() -> bool {
+        return root.editing-id >= 0;
+    }
+
+    function toggle-game-section() {
+        root.form-game-expanded = !root.form-game-expanded;
+        if !root.form-game-expanded && root.form-focused-index >= 3 && root.form-focused-index <= 5 {
+            root.form-focused-index = 2;
+            root.form-sub-index = 0;
+        }
+    }
+
     function move-form-selection(delta: int) {
         if root.form-focused-index < 0 {
             root.form-focused-index = 0;
@@ -257,6 +269,9 @@ export component AppWindow inherits Window {
         // are stepped over as one block back to the header or on to Shortcut.
         if root.form-focused-index >= 3 && root.form-focused-index <= 5 && !root.form-game-expanded {
             root.form-focused-index = delta < 0 ? 2 : 6;
+        }
+        if root.form-focused-index == 5 && !root.form-can-generate-bat() {
+            root.form-focused-index = delta < 0 ? 4 : 6;
         }
         root.form-sub-index = 0;
     }
@@ -692,14 +707,14 @@ export component AppWindow inherits Window {
                 root.browse-exe();
             }
         } else if root.form-focused-index == 2 {
-            root.form-game-expanded = !root.form-game-expanded;
+            root.toggle-game-section();
         } else if root.form-focused-index == 3 {
             root.browse-game-exe();
         } else if root.form-focused-index == 4 {
             if via-gamepad {
                 root.open-keyboard("game-args", -1, root.form-game-args);
             }
-        } else if root.form-focused-index == 5 {
+        } else if root.form-focused-index == 5 && root.form-can-generate-bat() {
             root.generate-game-bat();
         } else if root.form-focused-index == 6 {
             root.start-shortcut-recording();
@@ -993,6 +1008,7 @@ export component AppWindow inherits Window {
             cheats: root.form-cheats;
             show-exe-field: root.form-exe-field-visible();
             game-expanded: root.form-game-expanded;
+            can-generate-bat: root.form-can-generate-bat();
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
@@ -1000,7 +1016,7 @@ export component AppWindow inherits Window {
             browse-exe => { root.browse-exe(); }
             browse-game-exe => { root.browse-game-exe(); }
             game-args-changed(v) => { root.form-game-args = v; }
-            toggle-game-section => { root.form-game-expanded = !root.form-game-expanded; }
+            toggle-game-section => { root.toggle-game-section(); }
             generate-bat => { root.generate-game-bat(); }
             record-shortcut => { root.start-shortcut-recording(); }
             add-cheat => { root.add-cheat-row(); }
