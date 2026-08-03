@@ -955,7 +955,6 @@ export component AppWindow inherits Window {
             launch-trainer(id) => { root.launch-trainer(id); }
             edit-trainer(id) => { root.open-edit(id); }
             delete-trainer(id) => { root.request-delete(id); }
-            copy-trainer(id) => { root.copy-script(id); }
             search-changed(q) => { root.search-changed(q); }
         }
 
@@ -1009,6 +1008,7 @@ export component AppWindow inherits Window {
             show-exe-field: root.form-exe-field-visible();
             game-expanded: root.form-game-expanded;
             can-generate-bat: root.form-can-generate-bat();
+            edit-mode: root.editing-id >= 0;
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
@@ -1023,6 +1023,7 @@ export component AppWindow inherits Window {
             remove-cheat(id) => { root.remove-cheat-row(id); }
             cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
             record-cheat(id) => { root.start-cheat-recording(id); }
+            copy-script => { root.copy-script(root.editing-id); }
             cancel => { root.cancel-form(); }
             save => { root.save-form(); }
         }
