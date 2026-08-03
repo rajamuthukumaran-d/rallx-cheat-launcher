@@ -32,6 +32,10 @@ export component TextField inherits Rectangle {
         visible: root.text.is-empty;
     }
 
+    TouchArea {
+        clicked => { input.focus(); }
+    }
+
     input := TextInput {
         x: pad-h;
         width: parent.width - pad-h * 2;
@@ -44,13 +48,5 @@ export component TextField inherits Rectangle {
         read-only: root.read-only;
         edited => { root.edited(); }
         accepted => { root.accepted(); }
-    }
-
-    TouchArea {
-        clicked => {
-            input.focus();
-            // Slint clamps selection offsets past the UTF-8 byte length to the end.
-            input.set-selection-offsets(2147483647, 2147483647);
-        }
     }
 }
