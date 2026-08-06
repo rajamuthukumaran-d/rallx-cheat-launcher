@@ -400,15 +400,88 @@ pub enum LaunchMode {
     Elevated,
 }
 
-pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchMode, std::io::Error> {
+enum ProcessHandle {
+    Direct(std::process::Child),
+    Elevated(std::os::windows::io::OwnedHandle),
+}
+
+impl ProcessHandle {
+    fn raw(&self) -> windows::Win32::Foundation::HANDLE {
+        use std::os::windows::io::AsRawHandle;
+
+        match self {
+            Self::Direct(child) => windows::Win32::Foundation::HANDLE(child.as_raw_handle()),
+            Self::Elevated(handle) => windows::Win32::Foundation::HANDLE(handle.as_raw_handle()),
+        }
+    }
+}
+
+/// A launched trainer whose process handle remains available for readiness and
+/// liveness checks. Dropping this value closes the handle but does not stop the
+/// trainer.
+pub struct LaunchedTrainer {
+    mode: LaunchMode,
+    process: ProcessHandle,
+}
+
+impl LaunchedTrainer {
+    pub fn mode(&self) -> LaunchMode {
+        self.mode
+    }
+
+    pub fn is_running(&mut self) -> Result<bool, std::io::Error> {
+        use windows::Win32::Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use windows::Win32::System::Threading::WaitForSingleObject;
+
+        if let ProcessHandle::Direct(child) = &mut self.process {
+            return child.try_wait().map(|status| status.is_none());
+        }
+
+        match unsafe { WaitForSingleObject(self.process.raw(), 0) } {
+            WAIT_TIMEOUT => Ok(true),
+            WAIT_OBJECT_0 => Ok(false),
+            WAIT_FAILED => Err(std::io::Error::last_os_error()),
+            result => Err(std::io::Error::other(format!(
+                "unexpected process wait result {}",
+                result.0
+            ))),
+        }
+    }
+
+    /// Waits for the trainer's GUI thread to finish its initial input setup.
+    /// `Ok(false)` means the timeout elapsed; callers may still continue after
+    /// a grace period because some programs never expose a standard GUI queue.
+    pub fn wait_for_input_idle(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<bool, std::io::Error> {
+        use windows::Win32::Foundation::WAIT_TIMEOUT;
+        use windows::Win32::System::Threading::WaitForInputIdle;
+
+        let timeout_ms = timeout.as_millis().min(u128::from(u32::MAX)) as u32;
+        match unsafe { WaitForInputIdle(self.process.raw(), timeout_ms) } {
+            0 => Ok(true),
+            result if result == WAIT_TIMEOUT.0 => Ok(false),
+            _ => Err(std::io::Error::last_os_error()),
+        }
+    }
+}
+
+pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchedTrainer, std::io::Error> {
     let full_path = folder.join(filename);
     match std::process::Command::new(&full_path)
         .current_dir(folder)
         .spawn()
     {
-        Ok(_) => Ok(LaunchMode::Direct),
+        Ok(child) => Ok(LaunchedTrainer {
+            mode: LaunchMode::Direct,
+            process: ProcessHandle::Direct(child),
+        }),
         Err(err) if err.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
-            launch_elevated(&full_path, folder).map(|()| LaunchMode::Elevated)
+            launch_elevated(&full_path, folder).map(|handle| LaunchedTrainer {
+                mode: LaunchMode::Elevated,
+                process: ProcessHandle::Elevated(handle),
+            })
         }
         Err(err) => Err(err),
     }
@@ -423,9 +496,13 @@ fn wide(value: &Path) -> Vec<u16> {
         .collect()
 }
 
-fn launch_elevated(exe: &Path, folder: &Path) -> Result<(), std::io::Error> {
+fn launch_elevated(
+    exe: &Path,
+    folder: &Path,
+) -> Result<std::os::windows::io::OwnedHandle, std::io::Error> {
+    use std::os::windows::io::FromRawHandle;
+
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
@@ -454,11 +531,13 @@ fn launch_elevated(exe: &Path, folder: &Path) -> Result<(), std::io::Error> {
         std::io::Error::other(format!("could not launch elevated: {}", err.message()))
     })?;
 
-    if !info.hProcess.is_invalid() {
-        unsafe { CloseHandle(info.hProcess) }.ok();
+    if info.hProcess.is_invalid() {
+        return Err(std::io::Error::other(
+            "elevated trainer launch returned no process handle",
+        ));
     }
 
-    Ok(())
+    Ok(unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(info.hProcess.0) })
 }
 
 /// Deletes a trainer's executable from the trainer folder. A file that has
