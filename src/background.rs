@@ -20,9 +20,10 @@ use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, T
 /// continue after the grace period below.
 const TRAINER_READY_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Some trainers install their hotkey hooks immediately after their first GUI
-/// idle point, so readiness gets a small cushion before injection starts.
-const TRAINER_READY_GRACE: Duration = Duration::from_millis(750);
+/// A trainer can finish its own GUI initialization before it has attached to
+/// the game, so newly launched trainers get this additional head start before
+/// their default cheats are injected.
+const TRAINER_READY_GRACE: Duration = Duration::from_secs(3);
 
 /// A global-hotkey event arrives on key-down. Injection waits for the physical
 /// shortcut to be released so its keys cannot contaminate the first cheat.
