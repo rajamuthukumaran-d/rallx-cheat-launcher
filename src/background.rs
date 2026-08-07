@@ -228,13 +228,16 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
 
     std::thread::spawn(move || {
         let _guard = guard;
+        let has_cheats = !plan.cheats.is_empty();
 
-        if let Some(hotkey) = plan.hotkey.as_ref() {
-            if !keys::wait_until_released(hotkey, HOTKEY_RELEASE_TIMEOUT) {
-                crate::dialog::warning(
-                    "The launch shortcut is still held. Release it and try again.",
-                );
-                return;
+        if has_cheats {
+            if let Some(hotkey) = plan.hotkey.as_ref() {
+                if !keys::wait_until_released(hotkey, HOTKEY_RELEASE_TIMEOUT) {
+                    crate::dialog::warning(
+                        "The launch shortcut is still held. Release it and try again.",
+                    );
+                    return;
+                }
             }
         }
 
@@ -266,35 +269,37 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                 }
             }
 
-            if let Some(process) = trainer_process.as_ref() {
-                if let Err(err) = process.wait_for_input_idle(TRAINER_READY_TIMEOUT) {
-                    eprintln!(
-                        "Could not wait for {} to become ready: {err}",
-                        plan.filename
-                    );
-                }
-            }
-            std::thread::sleep(TRAINER_READY_GRACE);
-
-            let still_running = match trainer_process.as_mut() {
-                Some(process) => match process.is_running() {
-                    Ok(running) => running,
-                    Err(err) => {
-                        crate::dialog::error(&format!(
-                            "Could not check whether {} is running: {err}",
+            if has_cheats {
+                if let Some(process) = trainer_process.as_ref() {
+                    if let Err(err) = process.wait_for_input_idle(TRAINER_READY_TIMEOUT) {
+                        eprintln!(
+                            "Could not wait for {} to become ready: {err}",
                             plan.filename
-                        ));
-                        return;
+                        );
                     }
-                },
-                None => false,
-            };
-            if !still_running {
-                crate::dialog::error(&format!(
-                    "{} exited before its default cheats could be sent",
-                    plan.filename
-                ));
-                return;
+                }
+                std::thread::sleep(TRAINER_READY_GRACE);
+
+                let still_running = match trainer_process.as_mut() {
+                    Some(process) => match process.is_running() {
+                        Ok(running) => running,
+                        Err(err) => {
+                            crate::dialog::error(&format!(
+                                "Could not check whether {} is running: {err}",
+                                plan.filename
+                            ));
+                            return;
+                        }
+                    },
+                    None => false,
+                };
+                if !still_running {
+                    crate::dialog::error(&format!(
+                        "{} exited before its default cheats could be sent",
+                        plan.filename
+                    ));
+                    return;
+                }
             }
         }
         drop(trainer_process);
@@ -313,7 +318,7 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
         // launch-time cheats. Put it away once that first batch is complete;
         // repeat hotkeys only inject into the existing process and must leave
         // the foreground game untouched.
-        if launched_now {
+        if launched_now && has_cheats {
             let trainer_process = state.trainer.lock().unwrap_or_else(|err| err.into_inner());
             if let Some(process) = trainer_process.as_ref() {
                 process.minimize_if_foreground();
