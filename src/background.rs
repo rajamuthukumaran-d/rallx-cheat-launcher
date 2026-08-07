@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use slint::{ComponentHandle, Timer, TimerMode};
@@ -15,13 +15,23 @@ use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
 use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
 
-/// Head start the trainer gets before the first cheat combo is injected -
-/// keystrokes sent while it is still initializing are dropped.
-const LAUNCH_SETTLE: Duration = Duration::from_millis(1000);
+/// Maximum time to wait for a newly launched trainer's GUI thread to finish
+/// initialization. Programs without a standard GUI queue time out and then
+/// continue after the grace period below.
+const TRAINER_READY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A trainer can finish its own GUI initialization before it has attached to
+/// the game, so newly launched trainers get this additional head start before
+/// their default cheats are injected.
+const TRAINER_READY_GRACE: Duration = Duration::from_secs(3);
+
+/// A global-hotkey event arrives on key-down. Injection waits for the physical
+/// shortcut to be released so its keys cannot contaminate the first cheat.
+const HOTKEY_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Gap between consecutive cheat combos. Trainers debounce their own hotkeys,
 /// so back-to-back combos would register as one.
-const CHEAT_INTERVAL: Duration = Duration::from_millis(150);
+const CHEAT_INTERVAL: Duration = Duration::from_millis(300);
 
 /// How often the event loop drains the global-hotkey channel.
 const HOTKEY_POLL: Duration = Duration::from_millis(60);
@@ -149,16 +159,16 @@ static UIPI_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Default)]
 struct TriggerState {
-    /// Whether the trainer has been started at least once, so repeat hotkey
-    /// presses re-inject the cheats instead of spawning a second trainer.
-    launched: AtomicBool,
+    /// Retaining the process handle lets repeat hotkeys distinguish a running
+    /// trainer from one the user has closed.
+    trainer: Mutex<Option<trainer::LaunchedTrainer>>,
     /// Held for the duration of one launch-and-inject sequence. A hotkey held
     /// down auto-repeats, and two sequences running at once would interleave
     /// their modifier down/up events into combos nobody configured.
     running: AtomicBool,
     /// Whether a launch has been *asked for*, set before the worker thread
-    /// starts rather than after it succeeds. [`launched`](Self::launched) is
-    /// too late to gate a renderer restart on: the thread sets it well after
+    /// starts rather than after it succeeds. The tracked trainer process is
+    /// populated too late to gate a renderer restart: the worker sets it after
     /// `trigger` returns, leaving a window where a restart would launch the
     /// trainer a second time.
     attempted: AtomicBool,
@@ -218,20 +228,81 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
 
     std::thread::spawn(move || {
         let _guard = guard;
+        let has_cheats = !plan.cheats.is_empty();
 
-        if force_launch || !state.launched.load(Ordering::SeqCst) {
+        if has_cheats {
+            if let Some(hotkey) = plan.hotkey.as_ref() {
+                if !keys::wait_until_released(hotkey, HOTKEY_RELEASE_TIMEOUT) {
+                    crate::dialog::warning(
+                        "The launch shortcut is still held. Release it and try again.",
+                    );
+                    return;
+                }
+            }
+        }
+
+        let mut trainer_process = state.trainer.lock().unwrap_or_else(|err| err.into_inner());
+        let trainer_running = match trainer_process.as_mut() {
+            Some(process) => match process.is_running() {
+                Ok(running) => running,
+                Err(err) => {
+                    crate::dialog::error(&format!(
+                        "Could not check whether {} is running: {err}",
+                        plan.filename
+                    ));
+                    return;
+                }
+            },
+            None => false,
+        };
+        let launched_now = force_launch || !trainer_running;
+
+        if launched_now {
             match trainer::launch_trainer(&plan.folder, &plan.filename) {
-                Ok(mode) => {
-                    state.launched.store(true, Ordering::SeqCst);
-                    warn_if_cheats_cannot_reach(&plan, mode);
+                Ok(process) => {
+                    warn_if_cheats_cannot_reach(&plan, process.mode());
+                    *trainer_process = Some(process);
                 }
                 Err(err) => {
                     crate::dialog::error(&format!("Failed to launch {}: {err}", plan.filename));
                     return;
                 }
             }
-            std::thread::sleep(LAUNCH_SETTLE);
+
+            if has_cheats {
+                if let Some(process) = trainer_process.as_ref() {
+                    if let Err(err) = process.wait_for_input_idle(TRAINER_READY_TIMEOUT) {
+                        eprintln!(
+                            "Could not wait for {} to become ready: {err}",
+                            plan.filename
+                        );
+                    }
+                }
+                std::thread::sleep(TRAINER_READY_GRACE);
+
+                let still_running = match trainer_process.as_mut() {
+                    Some(process) => match process.is_running() {
+                        Ok(running) => running,
+                        Err(err) => {
+                            crate::dialog::error(&format!(
+                                "Could not check whether {} is running: {err}",
+                                plan.filename
+                            ));
+                            return;
+                        }
+                    },
+                    None => false,
+                };
+                if !still_running {
+                    crate::dialog::error(&format!(
+                        "{} exited before its default cheats could be sent",
+                        plan.filename
+                    ));
+                    return;
+                }
+            }
         }
+        drop(trainer_process);
 
         let mut failed = Vec::new();
         for (index, combo) in plan.cheats.iter().enumerate() {
@@ -242,6 +313,18 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                 failed.push(format!("{combo} ({err})"));
             }
         }
+
+        // A newly opened trainer takes the foreground so it can receive its
+        // launch-time cheats. Put it away once that first batch is complete;
+        // repeat hotkeys only inject into the existing process and must leave
+        // the foreground game untouched.
+        if launched_now && has_cheats {
+            let trainer_process = state.trainer.lock().unwrap_or_else(|err| err.into_inner());
+            if let Some(process) = trainer_process.as_ref() {
+                process.minimize_if_foreground();
+            }
+        }
+
         // One dialog for the batch, not one per combo - and a dialog rather
         // than stderr for the same reason the rest of tray mode uses them:
         // there is no console to print to.

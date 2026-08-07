@@ -6,10 +6,11 @@ import { ModalBackdrop } from "../components/modal-backdrop.slint";
 // is indistinguishable from the top-row equivalent.
 export component KeyRecorderModal inherits ModalBackdrop {
     in-out property <string> recorded-combo: "";
-    // Gamepad left/right focus between the two buttons below; true = Confirm
-    // (Use combo), false = Cancel. Driven by AppWindow's confirm-popup-index.
-    in property <bool> confirm-focused: true;
+    // Gamepad left/right focus across Cancel, Clear, and Use combo. Driven by
+    // AppWindow's confirm-popup-index while this popup is open.
+    in property <int> focused-index: 2;
     callback cancel();
+    callback clear();
     callback confirm();
 
     function is-bare-modifier(text: string) -> bool {
@@ -160,9 +161,9 @@ export component KeyRecorderModal inherits ModalBackdrop {
 
                         Text {
                             text: "Cancel";
-                            color: root.confirm-focused ? Theme.text : Theme.accent;
+                            color: root.focused-index == 0 ? Theme.accent : Theme.text;
                             font-size: 15px;
-                            font-weight: root.confirm-focused ? 600 : 800;
+                            font-weight: root.focused-index == 0 ? 800 : 600;
                         }
                     }
 
@@ -171,9 +172,34 @@ export component KeyRecorderModal inherits ModalBackdrop {
 
                 Rectangle {
                     horizontal-stretch: 1;
+                    background: Theme.panel2;
+                    border-width: 1px;
+                    border-color: root.focused-index == 1 ? Theme.danger : Theme.border;
+                    border-radius: 8px;
+                    height: clear-lay.min-height;
+
+                    clear-lay := HorizontalLayout {
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        alignment: center;
+
+                        Text {
+                            text: "Clear";
+                            color: Theme.danger;
+                            font-size: 15px;
+                            font-weight: root.focused-index == 1 ? 800 : 600;
+                        }
+                    }
+
+                    TouchArea { clicked => { root.clear(); } }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
                     background: Theme.accent;
                     border-radius: 8px;
                     height: use-lay.min-height;
+                    opacity: root.recorded-combo.is-empty ? 0.45 : 1;
 
                     use-lay := HorizontalLayout {
                         padding-top: 12px;
@@ -184,11 +210,14 @@ export component KeyRecorderModal inherits ModalBackdrop {
                             text: "Use combo";
                             color: Theme.on-accent;
                             font-size: 15px;
-                            font-weight: root.confirm-focused ? 900 : 700;
+                            font-weight: root.focused-index == 2 ? 900 : 700;
                         }
                     }
 
-                    TouchArea { clicked => { root.confirm(); } }
+                    TouchArea {
+                        enabled: !root.recorded-combo.is-empty;
+                        clicked => { root.confirm(); }
+                    }
                 }
             }
         }

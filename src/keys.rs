@@ -9,14 +9,18 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VIRTUAL_KEY,
 };
 
 /// How long a synthesized key stays down. Trainers poll `GetAsyncKeyState`
 /// rather than reading the message queue, so a down/up pair sent in the same
 /// tick is missed entirely.
-pub const KEY_DWELL: Duration = Duration::from_millis(45);
+pub const KEY_DWELL: Duration = Duration::from_millis(100);
+
+/// How often physical key state is sampled while waiting for a global launch
+/// shortcut to be released.
+const RELEASE_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Key {
@@ -364,6 +368,12 @@ impl KeyCombo {
         }
         vks
     }
+
+    fn virtual_keys(&self) -> Vec<u16> {
+        let mut keys = self.modifier_vks();
+        keys.push(self.key.vk);
+        keys
+    }
 }
 
 pub fn format_combo_for_display(combo: &str) -> String {
@@ -376,6 +386,27 @@ pub fn canonicalize_combo(combo: &str) -> String {
     parse_combo(combo)
         .map(|combo| combo.canonical())
         .unwrap_or_else(|_| combo.to_string())
+}
+
+/// Waits until none of the physical keys in `combo` are held. Global-hotkey
+/// reports key-down immediately, so injecting another combo before key-up can
+/// unintentionally add the launch shortcut's modifiers to the first cheat.
+pub fn wait_until_released(combo: &KeyCombo, timeout: Duration) -> bool {
+    let keys = combo.virtual_keys();
+    let started = std::time::Instant::now();
+
+    loop {
+        let released = keys
+            .iter()
+            .all(|vk| unsafe { GetAsyncKeyState(i32::from(*vk)) } >= 0);
+        if released {
+            return true;
+        }
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        sleep(RELEASE_POLL);
+    }
 }
 
 impl fmt::Display for KeyCombo {
