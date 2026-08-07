@@ -465,6 +465,32 @@ impl LaunchedTrainer {
             _ => Err(std::io::Error::last_os_error()),
         }
     }
+
+    /// Minimizes the trainer only while one of its windows still owns the
+    /// foreground. This avoids disturbing the game if focus changed while the
+    /// launch-time cheat sequence was being injected.
+    pub fn minimize_if_foreground(&self) {
+        use windows::Win32::System::Threading::GetProcessId;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId, ShowWindow, SW_MINIMIZE,
+        };
+
+        let process_id = unsafe { GetProcessId(self.process.raw()) };
+        if process_id == 0 {
+            return;
+        }
+
+        let foreground = unsafe { GetForegroundWindow() };
+        if foreground.0.is_null() {
+            return;
+        }
+
+        let mut foreground_process_id = 0;
+        unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_process_id)) };
+        if foreground_process_id == process_id {
+            let _ = unsafe { ShowWindow(foreground, SW_MINIMIZE) };
+        }
+    }
 }
 
 pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchedTrainer, std::io::Error> {

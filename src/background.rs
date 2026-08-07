@@ -308,6 +308,18 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                 failed.push(format!("{combo} ({err})"));
             }
         }
+
+        // A newly opened trainer takes the foreground so it can receive its
+        // launch-time cheats. Put it away once that first batch is complete;
+        // repeat hotkeys only inject into the existing process and must leave
+        // the foreground game untouched.
+        if launched_now {
+            let trainer_process = state.trainer.lock().unwrap_or_else(|err| err.into_inner());
+            if let Some(process) = trainer_process.as_ref() {
+                process.minimize_if_foreground();
+            }
+        }
+
         // One dialog for the batch, not one per combo - and a dialog rather
         // than stderr for the same reason the rest of tray mode uses them:
         // there is no console to print to.
