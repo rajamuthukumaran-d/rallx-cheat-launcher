@@ -134,8 +134,8 @@ pub struct TrainerConfig {
     pub game_args: Option<String>,
     /// Executable used to match the running game when the global shortcut is
     /// pressed. Its lifetime also controls cleanup: once this exact executable
-    /// has been seen and then exits, Rallx terminates the trainer it launched
-    /// and exits too.
+    /// has been seen and then exits, Rallx terminates the trainer it launched.
+    /// Rallx itself exits afterward only in launch-option background mode.
     #[serde(default)]
     pub watched_exe: Option<String>,
     pub launch_shortcut: Option<String>,

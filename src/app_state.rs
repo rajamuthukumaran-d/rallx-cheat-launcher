@@ -811,7 +811,14 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
                                 let _ = slint::invoke_from_event_loop(move || {
                                     match cleanup_result {
                                         Ok(()) => {
-                                            let _ = slint::quit_event_loop();
+                                            if let Some(app) = cleanup_weak.upgrade() {
+                                                show_toast(
+                                                    &app,
+                                                    format!(
+                                                        "Closed {cleanup_name} after the selected app exited"
+                                                    ),
+                                                );
+                                            }
                                         }
                                         Err(err) => {
                                             eprintln!(

@@ -87,7 +87,9 @@ silently violate a requirement from another section.)
   button that is disabled once the process is already elevated.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
-  (key/key-combo) entered via a record button that captures live key input.
+  (key/key-combo) entered via a record button that captures live key input. A
+  watched executable closes the launched trainer when it exits; Rallx itself
+  then exits only in launch-option background/tray mode, not windowed mode.
 - **Trainer launching:** click/play/A-button launches the trainer executable,
   resolved relative to the configured trainer folder (trainers are referenced
   by filename only, never full path).

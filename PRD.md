@@ -37,8 +37,9 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - Show the selected trainer information and allow user to modify Name
 - An option to choose game exe
 - An optional executable to watch. After that app has been seen running and
-  then closes, Rallx closes the trainer it launched and exits too. This works
-  in both windowed and background/tray launches.
+  then closes, Rallx closes the trainer it launched. Rallx itself exits only
+  for a background/tray launch started with launch options; the windowed app
+  stays open.
 - Assign shortcut to launch trainer
 - Add list of cheats need to enable (Will be a list containing key or key combination eg, Numpad 1, ctrl + numberpad 3, etc)
 - When adding cheats to enable allow user to enter key or key combination by clicking on a record button
