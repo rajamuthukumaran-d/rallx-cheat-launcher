@@ -649,11 +649,27 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                         match watch_result {
                             Ok(()) => {
                                 let cleanup_result = process.terminate();
+                                let cleanup_weak = result_weak.clone();
+                                let cleanup_name = name.clone();
                                 let _ = slint::invoke_from_event_loop(move || {
-                                    if let Err(err) = cleanup_result {
-                                        eprintln!("Could not close the launched trainer: {err}");
+                                    match cleanup_result {
+                                        Ok(()) => {
+                                            let _ = slint::quit_event_loop();
+                                        }
+                                        Err(err) => {
+                                            eprintln!(
+                                                "Could not close the launched trainer: {err}"
+                                            );
+                                            if let Some(app) = cleanup_weak.upgrade() {
+                                                show_toast(
+                                                    &app,
+                                                    format!(
+                                                        "Could not close {cleanup_name}: {err}. Close it manually to finish cleanup."
+                                                    ),
+                                                );
+                                            }
+                                        }
                                     }
-                                    let _ = slint::quit_event_loop();
                                 });
                             }
                             Err(err) => {

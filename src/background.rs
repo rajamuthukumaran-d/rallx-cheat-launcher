@@ -349,6 +349,7 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
             if let Some(watched_exe) = plan.watched_exe.clone() {
                 if !state.watcher_started.swap(true, Ordering::SeqCst) {
                     let state = state.clone();
+                    let trainer_filename = plan.filename.clone();
                     std::thread::spawn(move || {
                         let watch_result = trainer::wait_for_watched_exe_exit(
                             &watched_exe,
@@ -363,12 +364,18 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                                     Some(process) => process.terminate(),
                                     None => Ok(()),
                                 };
-                                if let Err(err) = cleanup_result {
-                                    eprintln!("Could not close the launched trainer: {err}");
+                                drop(launched);
+                                match cleanup_result {
+                                    Ok(()) => {
+                                        let _ = slint::invoke_from_event_loop(|| {
+                                            let _ = slint::quit_event_loop();
+                                        });
+                                    }
+                                    Err(err) => crate::dialog::error(&format!(
+                                        "Could not close {}: {err}. Close it manually, then exit Rallx from the tray.",
+                                        trainer_filename
+                                    )),
                                 }
-                                let _ = slint::invoke_from_event_loop(|| {
-                                    let _ = slint::quit_event_loop();
-                                });
                             }
                             Err(err) => {
                                 state.watcher_started.store(false, Ordering::SeqCst);

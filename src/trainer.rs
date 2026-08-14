@@ -534,24 +534,19 @@ impl LaunchedTrainer {
     }
 }
 
-/// Waits until a process with the selected executable name has existed and all
-/// instances of it have then exited. Waiting for the first sighting prevents a
+/// Waits until the selected executable has existed and all instances of that
+/// exact file have then exited. Waiting for the first sighting prevents a
 /// trainer launch from immediately cleaning itself up when the game/app is
 /// configured but has not started yet.
 pub fn wait_for_watched_exe_exit(
     watched_exe: &Path,
     poll_interval: std::time::Duration,
 ) -> Result<(), std::io::Error> {
-    let filename = watched_exe
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid executable name")
-        })?;
+    let watched_exe = watched_exe.canonicalize()?;
     let mut seen_running = false;
 
     loop {
-        let running = process_name_is_running(filename)?;
+        let running = process_path_is_running(&watched_exe)?;
         if running {
             seen_running = true;
         } else if seen_running {
@@ -561,13 +556,17 @@ pub fn wait_for_watched_exe_exit(
     }
 }
 
-fn process_name_is_running(filename: &str) -> Result<bool, std::io::Error> {
+fn process_path_is_running(watched_exe: &Path) -> Result<bool, std::io::Error> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
+
+    let filename = watched_exe.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid executable name")
+    })?;
 
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
         .map_err(|err| std::io::Error::other(err.message()))?;
@@ -588,13 +587,69 @@ fn process_name_is_running(filename: &str) -> Result<bool, std::io::Error> {
             .iter()
             .position(|&character| character == 0)
             .unwrap_or(entry.szExeFile.len());
-        if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case(filename) {
+        if String::from_utf16_lossy(&entry.szExeFile[..end])
+            .eq_ignore_ascii_case(&filename.to_string_lossy())
+            && process_matches_path(entry.th32ProcessID, watched_exe)?
+        {
             return Ok(true);
         }
         if unsafe { Process32NextW(raw, &mut entry) }.is_err() {
             return Ok(false);
         }
     }
+}
+
+fn process_matches_path(process_id: u32, watched_exe: &Path) -> Result<bool, std::io::Error> {
+    use windows::core::HRESULT;
+    use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
+
+    let image_path = match process_image_path(process_id) {
+        Ok(path) => path,
+        // The process can legitimately exit between taking the snapshot and
+        // opening its handle. Treat that race as an absent process so a seen
+        // watched app can finish cleanup normally.
+        Err(err) if err.code() == HRESULT::from_win32(ERROR_INVALID_PARAMETER.0) => {
+            return Ok(false);
+        }
+        Err(err) => return Err(std::io::Error::other(err.message())),
+    };
+    let image_path = match image_path.canonicalize() {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+
+    Ok(image_path == watched_exe)
+}
+
+fn process_image_path(process_id: u32) -> windows::core::Result<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }?;
+    let process = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(process.0) };
+    let raw = HANDLE(process.as_raw_handle());
+    let mut buffer = vec![0_u16; 32_768];
+    let mut length = buffer.len() as u32;
+    unsafe {
+        QueryFullProcessImageNameW(
+            raw,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+    }?;
+    buffer.truncate(length as usize);
+
+    Ok(std::path::PathBuf::from(std::ffi::OsString::from_wide(
+        &buffer,
+    )))
 }
 
 pub fn launch_trainer(folder: &Path, filename: &str) -> Result<LaunchedTrainer, std::io::Error> {
@@ -738,10 +793,28 @@ mod tests {
 
     #[test]
     fn process_snapshot_finds_the_current_executable() {
-        let current = std::env::current_exe().unwrap();
-        let filename = current.file_name().and_then(|name| name.to_str()).unwrap();
+        let current = std::env::current_exe().unwrap().canonicalize().unwrap();
 
-        assert!(process_name_is_running(filename).unwrap());
+        assert!(process_path_is_running(&current).unwrap());
+    }
+
+    #[test]
+    fn process_snapshot_does_not_match_a_different_file_with_the_same_name() {
+        let current = std::env::current_exe().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "rallx-test-process-path-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join(current.file_name().unwrap());
+        std::fs::copy(&current, &copy).unwrap();
+        let copy = copy.canonicalize().unwrap();
+
+        let running = process_path_is_running(&copy).unwrap();
+
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(!running);
     }
 
     #[test]
