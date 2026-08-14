@@ -106,7 +106,7 @@ export component AppWindow inherits Window {
     in-out property <bool> form-game-expanded: false;
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
     // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
-    // launch options, 5 Generate .bat, 6 Watched app, 7 Shortcut, 8 Add cheat, one stop per
+    // launch options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Add cheat, one stop per
     // cheat row, then Cancel/Save last. Keep in sync with
     // form-item-count()/activate-form-focused() below and
     // AddEditTrainerModal's layout.
@@ -237,7 +237,7 @@ export component AppWindow inherits Window {
     }
 
     // Name, Trainer executable, Game section header, Game executable, Game
-    // launch options, Generate .bat, Watched app, Shortcut, Add cheat, one stop per cheat
+    // launch options, Shortcut, Generate .bat, Watched app, Add cheat, one stop per cheat
     // row, Cancel/Save.
     function form-item-count() -> int {
         return 10 + root.form-cheats.length;
@@ -256,7 +256,7 @@ export component AppWindow inherits Window {
 
     function toggle-game-section() {
         root.form-game-expanded = !root.form-game-expanded;
-        if !root.form-game-expanded && root.form-focused-index >= 3 && root.form-focused-index <= 5 {
+        if !root.form-game-expanded && root.form-focused-index >= 3 && root.form-focused-index <= 6 {
             root.form-focused-index = 2;
             root.form-sub-index = 0;
         }
@@ -271,13 +271,13 @@ export component AppWindow inherits Window {
         if root.form-focused-index == 1 && !root.form-exe-field-visible() {
             root.form-focused-index = delta < 0 ? 0 : 2;
         }
-        // The Game section's three body rows collapse away together, so they
-        // are stepped over as one block back to the header or on to Shortcut.
-        if root.form-focused-index >= 3 && root.form-focused-index <= 5 && !root.form-game-expanded {
-            root.form-focused-index = delta < 0 ? 2 : 6;
+        // The Game section's four body rows collapse away together, so they
+        // are stepped over as one block back to the header or on to Watched app.
+        if root.form-focused-index >= 3 && root.form-focused-index <= 6 && !root.form-game-expanded {
+            root.form-focused-index = delta < 0 ? 2 : 7;
         }
-        if root.form-focused-index == 5 && !root.form-can-generate-bat() {
-            root.form-focused-index = delta < 0 ? 4 : 6;
+        if root.form-focused-index == 6 && !root.form-can-generate-bat() {
+            root.form-focused-index = delta < 0 ? 5 : 7;
         }
         root.form-sub-index = 0;
     }
@@ -288,7 +288,7 @@ export component AppWindow inherits Window {
     function form-sub-count() -> int {
         if root.form-focused-index == 3 && !root.form-game-exe-path.is-empty {
             return 2;
-        } else if root.form-focused-index == 6 && !root.form-watched-exe-path.is-empty {
+        } else if root.form-focused-index == 7 && !root.form-watched-exe-path.is-empty {
             return 2;
         } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
             return 3;
@@ -762,16 +762,16 @@ export component AppWindow inherits Window {
             if via-gamepad {
                 root.open-keyboard("game-args", -1, root.form-game-args);
             }
-        } else if root.form-focused-index == 5 && root.form-can-generate-bat() {
+        } else if root.form-focused-index == 5 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 6 && root.form-can-generate-bat() {
             root.generate-game-bat();
-        } else if root.form-focused-index == 6 {
+        } else if root.form-focused-index == 7 {
             if root.form-sub-index == 0 {
                 root.browse-watched-exe();
             } else {
                 root.clear-watched-exe();
             }
-        } else if root.form-focused-index == 7 {
-            root.start-shortcut-recording();
         } else if root.form-focused-index == 8 {
             root.add-cheat-row();
         } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {

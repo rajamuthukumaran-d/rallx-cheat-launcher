@@ -222,10 +222,10 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     in property <bool> show-exe-field: true;
     // Gamepad focus target spanning the whole form: 0 Name, 1 Trainer
     // executable, 2 Game section header, 3 Game executable, 4 Game launch
-    // options, 5 Generate .bat, 6 Watched app, 7 Shortcut, 8 Add cheat, one stop per cheat
+    // options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Add cheat, one stop per cheat
     // row, then the Cancel/Save row last. -1 means nothing focused. Driven by
     // AppWindow's move-form-selection/activate-form-focused via D-Pad up/down
-    // and A; 3-5 are skipped while the Game section is collapsed.
+    // and A; 3-6 are skipped while the Game section is collapsed.
     in property <int> focused-index: -1;
     // Left/right position within the focused row (cheat row: 0 label,
     // 1 record key, 2 remove; Cancel/Save row: 0 Cancel, 1 Save). Driven by
@@ -457,6 +457,23 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         if root.game-expanded: VerticalLayout {
                             vertical-stretch: 0;
                             spacing: 6px;
+                            padding-bottom: 16px;
+
+                            FieldLabel {
+                                text: "Shortcut to launch trainer";
+                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
+                                font-weight: root.focused-index == 5 ? 700 : 600;
+                            }
+                            RecordButton {
+                                label: root.form-shortcut-display;
+                                highlighted: root.focused-index == 5;
+                                clicked => { root.record-shortcut(); }
+                            }
+                        }
+
+                        if root.game-expanded: VerticalLayout {
+                            vertical-stretch: 0;
+                            spacing: 6px;
                             padding-bottom: 4px;
 
                             HorizontalLayout {
@@ -464,7 +481,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 ActionButton {
                                     label: "Generate .bat";
                                     enabled: root.can-generate-bat;
-                                    highlighted: root.focused-index == 5;
+                                    highlighted: root.focused-index == 6;
                                     clicked => { root.generate-bat(); }
                                 }
                             }
@@ -488,8 +505,8 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             vertical-stretch: 0;
                             label-text: "Game/app executable to watch";
                             value-text: root.form-watched-exe-display;
-                            highlighted: root.focused-index == 6 && root.sub-index == 0;
-                            clear-highlighted: root.focused-index == 6 && root.sub-index == 1;
+                            highlighted: root.focused-index == 7 && root.sub-index == 0;
+                            clear-highlighted: root.focused-index == 7 && root.sub-index == 1;
                             can-clear: root.form-watched-exe-display != "No app selected";
                             bottom-padding: 0px;
                             browse => { root.browse-watched-exe(); }
@@ -501,22 +518,6 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             color: Theme.text-dim;
                             font-size: 12px;
                             wrap: word-wrap;
-                        }
-                    }
-
-                    VerticalLayout {
-                        vertical-stretch: 0;
-                        spacing: 6px;
-                        padding-bottom: 20px;
-                        FieldLabel {
-                            text: "Shortcut to launch trainer";
-                            color: root.focused-index == 7 ? Theme.accent : Theme.text-dim;
-                            font-weight: root.focused-index == 7 ? 700 : 600;
-                        }
-                        RecordButton {
-                            label: root.form-shortcut-display;
-                            highlighted: root.focused-index == 7;
-                            clicked => { root.record-shortcut(); }
                         }
                     }
 
