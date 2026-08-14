@@ -97,8 +97,8 @@ export component AppWindow inherits Window {
     // the generated .bat - Rallx never launches the game itself.
     in-out property <string> form-game-args: "";
     // Optional executable whose lifetime controls cleanup after this trainer
-    // is launched. The path is displayed and persisted; process matching uses
-    // its filename.
+    // is launched. Its full path is displayed, persisted, and matched so an
+    // unrelated executable with the same filename cannot trigger cleanup.
     in-out property <string> form-watched-exe-display: "No app selected";
     in-out property <string> form-watched-exe-path: "";
     // Whether the form's Game section is expanded. Opened automatically when
