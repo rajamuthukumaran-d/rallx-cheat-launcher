@@ -16,6 +16,8 @@ export struct TrainerItem {
     game-exe: string,
     // Command line the generated .bat starts game-exe with, or empty.
     game-args: string,
+    // Absolute path of the executable whose exit triggers trainer cleanup.
+    watched-exe: string,
     shortcut: string,
     color: color,
     letter: string,

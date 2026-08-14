@@ -28,6 +28,8 @@ windows = { version = "0.58.0", features = [
     # IShellLinkW/IPersistFile, for reading a .lnk picked as a game.
     "Win32_System_Com",
     "Win32_System_Threading",
+    # Process snapshots are used to watch a configured game/app until it exits.
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
     "Win32_System_Environment",

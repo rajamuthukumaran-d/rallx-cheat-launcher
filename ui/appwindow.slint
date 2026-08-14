@@ -96,19 +96,25 @@ export component AppWindow inherits Window {
     // when a .lnk is picked and editable by hand otherwise. Only used to write
     // the generated .bat - Rallx never launches the game itself.
     in-out property <string> form-game-args: "";
+    // Optional executable whose lifetime controls cleanup after this trainer
+    // is launched. The path is displayed and persisted; process matching uses
+    // its filename.
+    in-out property <string> form-watched-exe-display: "No app selected";
+    in-out property <string> form-watched-exe-path: "";
     // Whether the form's Game section is expanded. Opened automatically when
     // the trainer being edited already has a game configured.
     in-out property <bool> form-game-expanded: false;
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
     // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
-    // launch options, 5 Generate .bat, 6 Shortcut, 7 Add cheat, one stop per
+    // launch options, 5 Generate .bat, 6 Watched app, 7 Shortcut, 8 Add cheat, one stop per
     // cheat row, then Cancel/Save last. Keep in sync with
     // form-item-count()/activate-form-focused() below and
     // AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
     // Left/right position within the current form-focused-index row, for
-    // rows with more than one field/button (a cheat row's label/record/
-    // remove, or the final Cancel/Save row). Reset to 0 on every row change.
+    // rows with more than one field/button (an executable field's browse/clear,
+    // a cheat row's label/record/remove, or the final Cancel/Save row). Reset
+    // to 0 on every row change.
     in-out property <int> form-sub-index: 0;
 
     in-out property <bool> recording: false;
@@ -231,10 +237,10 @@ export component AppWindow inherits Window {
     }
 
     // Name, Trainer executable, Game section header, Game executable, Game
-    // launch options, Generate .bat, Shortcut, Add cheat, one stop per cheat
+    // launch options, Generate .bat, Watched app, Shortcut, Add cheat, one stop per cheat
     // row, Cancel/Save.
     function form-item-count() -> int {
-        return 9 + root.form-cheats.length;
+        return 10 + root.form-cheats.length;
     }
 
     // The trainer-executable row (index 1) is only rendered when adding, so
@@ -277,20 +283,24 @@ export component AppWindow inherits Window {
     }
 
     // How many fields/buttons share the current form-focused-index row: 3 for
-    // a cheat row (label, record key, remove), 2 for the final Cancel/Save
-    // row, 1 everywhere else.
+    // a cheat row (label, record key, remove), 2 for a populated executable
+    // row (browse, clear) or the final Cancel/Save row, 1 everywhere else.
     function form-sub-count() -> int {
-        if root.form-focused-index >= 8 && root.form-focused-index < 8 + root.form-cheats.length {
+        if root.form-focused-index == 3 && !root.form-game-exe-path.is-empty {
+            return 2;
+        } else if root.form-focused-index == 6 && !root.form-watched-exe-path.is-empty {
+            return 2;
+        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
             return 3;
-        } else if root.form-focused-index == 8 + root.form-cheats.length {
+        } else if root.form-focused-index == 9 + root.form-cheats.length {
             return 2;
         }
         return 1;
     }
 
     // Which executable field, if either, a file dropped at (x, y) landed on.
-    // Returns "trainer", "game", or "" for a drop anywhere else. The zone
-    // rectangles come straight off the two ExeFields in the open form; the
+    // Returns "trainer", "game", "watched", or "" for a drop anywhere else. The zone
+    // rectangles come straight off the executable fields in the open form; the
     // hidden trainer row reports a zero-height rectangle, so it can never be
     // hit while editing.
     public function form-drop-zone(x: length, y: length) -> string {
@@ -310,6 +320,10 @@ export component AppWindow inherits Window {
         if x >= add-edit-modal.game-zone-left && x <= add-edit-modal.game-zone-right
             && y >= add-edit-modal.game-zone-top && y < add-edit-modal.game-zone-bottom {
             return "game";
+        }
+        if x >= add-edit-modal.watched-zone-left && x <= add-edit-modal.watched-zone-right
+            && y >= add-edit-modal.watched-zone-top && y < add-edit-modal.watched-zone-bottom {
+            return "watched";
         }
         return "";
     }
@@ -739,7 +753,11 @@ export component AppWindow inherits Window {
         } else if root.form-focused-index == 2 {
             root.toggle-game-section();
         } else if root.form-focused-index == 3 {
-            root.browse-game-exe();
+            if root.form-sub-index == 0 {
+                root.browse-game-exe();
+            } else {
+                root.clear-game-exe();
+            }
         } else if root.form-focused-index == 4 {
             if via-gamepad {
                 root.open-keyboard("game-args", -1, root.form-game-args);
@@ -747,20 +765,26 @@ export component AppWindow inherits Window {
         } else if root.form-focused-index == 5 && root.form-can-generate-bat() {
             root.generate-game-bat();
         } else if root.form-focused-index == 6 {
-            root.start-shortcut-recording();
+            if root.form-sub-index == 0 {
+                root.browse-watched-exe();
+            } else {
+                root.clear-watched-exe();
+            }
         } else if root.form-focused-index == 7 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 8 {
             root.add-cheat-row();
-        } else if root.form-focused-index >= 8 && root.form-focused-index < 8 + root.form-cheats.length {
+        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 if via-gamepad {
-                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 8].id, root.form-cheats[root.form-focused-index - 8].label);
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 9].id, root.form-cheats[root.form-focused-index - 9].label);
                 }
             } else if root.form-sub-index == 1 {
-                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 8].id);
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 9].id);
             } else if root.form-sub-index == 2 {
-                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 8].id);
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 9].id);
             }
-        } else if root.form-focused-index == 8 + root.form-cheats.length {
+        } else if root.form-focused-index == 9 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 root.cancel-form();
             } else {
@@ -908,6 +932,9 @@ export component AppWindow inherits Window {
     callback browse-folder();
     callback browse-exe();
     callback browse-game-exe();
+    callback clear-game-exe();
+    callback browse-watched-exe();
+    callback clear-watched-exe();
     // Writes the game's launch .bat next to the game executable. Handled in
     // app_state, which reads form-game-exe-path/form-game-args and the trainer
     // the form is on off this window.
@@ -1050,6 +1077,7 @@ export component AppWindow inherits Window {
             form-exe-display: root.form-exe-display;
             form-game-exe-display: root.form-game-exe-display;
             form-game-args <=> root.form-game-args;
+            form-watched-exe-display: root.form-watched-exe-display;
             form-shortcut-display: root.form-shortcut-display;
             cheats: root.form-cheats;
             show-exe-field: root.form-exe-field-visible();
@@ -1062,6 +1090,9 @@ export component AppWindow inherits Window {
             name-changed(v) => { root.form-name = v; }
             browse-exe => { root.browse-exe(); }
             browse-game-exe => { root.browse-game-exe(); }
+            clear-game-exe => { root.clear-game-exe(); }
+            browse-watched-exe => { root.browse-watched-exe(); }
+            clear-watched-exe => { root.clear-watched-exe(); }
             game-args-changed(v) => { root.form-game-args = v; }
             toggle-game-section => { root.toggle-game-section(); }
             generate-bat => { root.generate-game-bat(); }
