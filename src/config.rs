@@ -120,27 +120,32 @@ impl<'de> Deserialize<'de> for CheatConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LaunchScriptConfig {
+    pub game_exe: Option<String>,
+    /// Command line to start `game_exe` with, as taken from a picked .lnk or
+    /// typed by hand. Only ever written into a generated .bat; Rallx itself
+    /// never starts the game.
+    pub game_args: Option<String>,
+    pub launch_shortcut: Option<String>,
+    pub close_after_launch: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TrainerConfig {
     pub name: String,
     pub filename: String, // Filename only, not full path
     pub version: String,
     pub size_bytes: u64,
-    pub game_exe: Option<String>,
-    /// Command line to start `game_exe` with, as taken from a picked .lnk or
-    /// typed by hand. Only ever written into a generated .bat - Rallx itself
-    /// never starts the game. `default` because configs predate the field.
-    #[serde(default)]
-    pub game_args: Option<String>,
+    #[serde(rename = "launchScript")]
+    pub launch_script: LaunchScriptConfig,
     /// Executable used to match the running game when the global shortcut is
     /// pressed. Its lifetime also controls cleanup: once this exact executable
     /// has been seen and then exits, Rallx terminates the trainer it launched.
     /// Rallx itself exits afterward only in launch-option background mode.
     #[serde(default)]
     pub watched_exe: Option<String>,
-    pub launch_shortcut: Option<String>,
     pub default_cheats: Vec<CheatConfig>,
-    pub close_after_launch: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -294,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn older_trainer_configs_default_to_no_watched_executable() {
+    fn missing_watched_executable_defaults_to_none() {
         let config: AppConfig = serde_json::from_str(
             r#"{
                 "trainers": [{
@@ -302,15 +307,46 @@ mod tests {
                     "filename": "trainer.exe",
                     "version": "1.0",
                     "size_bytes": 1,
-                    "game_exe": null,
-                    "launch_shortcut": null,
-                    "default_cheats": [],
-                    "close_after_launch": false
+                    "launchScript": {
+                        "game_exe": null,
+                        "game_args": null,
+                        "launch_shortcut": null,
+                        "close_after_launch": false
+                    },
+                    "default_cheats": []
                 }]
             }"#,
         )
         .expect("parses");
 
         assert_eq!(config.trainers[0].watched_exe, None);
+    }
+
+    #[test]
+    fn launch_script_fields_serialize_under_one_camel_case_object() {
+        let trainer = TrainerConfig {
+            name: "Trainer".to_string(),
+            filename: "trainer.exe".to_string(),
+            version: "1.0".to_string(),
+            size_bytes: 1,
+            launch_script: LaunchScriptConfig {
+                game_exe: Some("C:\\Games\\Game.exe".to_string()),
+                game_args: Some("-windowed".to_string()),
+                launch_shortcut: Some("Insert".to_string()),
+                close_after_launch: true,
+            },
+            watched_exe: None,
+            default_cheats: Vec::new(),
+        };
+
+        let json = serde_json::to_value(trainer).expect("serializes");
+        let launch_script = json.get("launchScript").expect("nested object");
+
+        assert_eq!(launch_script["game_exe"], "C:\\Games\\Game.exe");
+        assert_eq!(launch_script["game_args"], "-windowed");
+        assert_eq!(launch_script["launch_shortcut"], "Insert");
+        assert_eq!(launch_script["close_after_launch"], true);
+        assert!(json.get("game_exe").is_none());
+        assert!(json.get("launch_shortcut").is_none());
     }
 }

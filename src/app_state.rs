@@ -13,7 +13,7 @@ use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
 };
 
-use crate::config::{AppConfig, CheatConfig, TrainerConfig};
+use crate::config::{AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig};
 use crate::{
     clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
     CheatEntry, Palette, Theme, TrainerItem,
@@ -139,6 +139,7 @@ fn config_to_trainer_item(
     let icon = exe_path.and_then(exe_icon::extract_icon);
     let size = format_size(cfg.size_bytes);
     let shortcut = cfg
+        .launch_script
         .launch_shortcut
         .as_deref()
         .map(keys::format_combo_for_display)
@@ -150,8 +151,8 @@ fn config_to_trainer_item(
             version: &cfg.version,
             size: &size,
             exe: &cfg.filename,
-            game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
-            game_args: cfg.game_args.as_deref().unwrap_or_default(),
+            game_exe: cfg.launch_script.game_exe.as_deref().unwrap_or_default(),
+            game_args: cfg.launch_script.game_args.as_deref().unwrap_or_default(),
             watched_exe: cfg.watched_exe.as_deref().unwrap_or_default(),
             shortcut: &shortcut,
             cheats,
@@ -418,10 +419,10 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
     let mut config = state.config.borrow_mut();
     if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
         entry.name = form.name.to_string();
-        entry.game_exe = game_exe;
-        entry.game_args = game_args;
+        entry.launch_script.game_exe = game_exe;
+        entry.launch_script.game_args = game_args;
         entry.watched_exe = watched_exe;
-        entry.launch_shortcut = launch_shortcut;
+        entry.launch_script.launch_shortcut = launch_shortcut;
         entry.default_cheats = default_cheats;
     } else {
         config.trainers.push(TrainerConfig {
@@ -429,12 +430,14 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
             filename: filename.to_string(),
             version: String::new(),
             size_bytes: 0,
-            game_exe,
-            game_args,
+            launch_script: LaunchScriptConfig {
+                game_exe,
+                game_args,
+                launch_shortcut,
+                close_after_launch: false,
+            },
             watched_exe,
-            launch_shortcut,
             default_cheats,
-            close_after_launch: false,
         });
     }
 
@@ -897,7 +900,7 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
                     .trainers
                     .iter()
                     .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer.exe))
-                    .is_some_and(|entry| entry.close_after_launch);
+                    .is_some_and(|entry| entry.launch_script.close_after_launch);
 
                 let built = build_launch_script(&trainer, close_after_launch);
                 match clipboard::set_text(&built.script) {
@@ -1254,7 +1257,7 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
                 .trainers
                 .iter()
                 .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer_filename))
-                .is_some_and(|entry| entry.close_after_launch);
+                .is_some_and(|entry| entry.launch_script.close_after_launch);
 
             let launcher = match std::env::current_exe() {
                 Ok(path) => path,

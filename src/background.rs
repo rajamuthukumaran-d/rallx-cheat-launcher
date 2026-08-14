@@ -106,7 +106,7 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
             return None;
         }
         saved
-            .and_then(|entry| entry.launch_shortcut.clone())
+            .and_then(|entry| entry.launch_script.launch_shortcut.clone())
             .or_else(|| config.default_shortcut.clone())
     });
 
@@ -497,7 +497,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CheatConfig, TrainerConfig};
+    use crate::config::{CheatConfig, LaunchScriptConfig, TrainerConfig};
 
     /// Cleans up on drop so a failing assertion doesn't leave the folder behind
     /// for the next run to trip over.
@@ -535,10 +535,13 @@ mod tests {
                 filename: "rdr2-trainer.exe".to_string(),
                 version: "1.0".to_string(),
                 size_bytes: 3,
-                game_exe: None,
-                game_args: None,
+                launch_script: LaunchScriptConfig {
+                    game_exe: None,
+                    game_args: None,
+                    launch_shortcut: Some("Insert".to_string()),
+                    close_after_launch: true,
+                },
                 watched_exe: Some("C:\\Games\\RDR2.exe".to_string()),
-                launch_shortcut: Some("Insert".to_string()),
                 default_cheats: vec![
                     CheatConfig {
                         label: "Health".to_string(),
@@ -549,7 +552,6 @@ mod tests {
                         key: String::new(),
                     },
                 ],
-                close_after_launch: true,
             }],
             ..AppConfig::default()
         }
@@ -648,7 +650,7 @@ mod tests {
     fn falls_back_to_the_global_shortcut_then_to_no_hotkey() {
         let folder = TrainerFolder::new("global");
         let mut cfg = config(folder.path());
-        cfg.trainers[0].launch_shortcut = None;
+        cfg.trainers[0].launch_script.launch_shortcut = None;
         let with_global = plan(&options("rdr2-trainer.exe"), &cfg).unwrap();
 
         cfg.default_shortcut = None;

@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use crate::config::TrainerConfig;
+use crate::config::{LaunchScriptConfig, TrainerConfig};
 use crate::exe_version;
 
 #[derive(Debug)]
@@ -777,12 +777,9 @@ pub fn sync_trainer_configs(
                 filename: info.filename,
                 version,
                 size_bytes: info.size_bytes,
-                game_exe: None,
-                game_args: None,
+                launch_script: LaunchScriptConfig::default(),
                 watched_exe: None,
-                launch_shortcut: None,
                 default_cheats: Vec::new(),
-                close_after_launch: false,
             });
         }
     }
@@ -990,15 +987,17 @@ mod tests {
             filename: "trainer.exe".to_string(),
             version: "1.2.3".to_string(),
             size_bytes: 0,
-            game_exe: Some("Game.exe".to_string()),
-            game_args: None,
+            launch_script: LaunchScriptConfig {
+                game_exe: Some("Game.exe".to_string()),
+                game_args: None,
+                launch_shortcut: Some("Ctrl+F1".to_string()),
+                close_after_launch: true,
+            },
             watched_exe: Some("C:\\Games\\Game.exe".to_string()),
-            launch_shortcut: Some("Ctrl+F1".to_string()),
             default_cheats: vec![crate::config::CheatConfig {
                 label: "Infinite Health".to_string(),
                 key: "Numpad1".to_string(),
             }],
-            close_after_launch: true,
         }];
 
         let synced = sync_trainer_configs(&existing, &dir).unwrap();
@@ -1012,7 +1011,10 @@ mod tests {
         // comes back empty rather than the stale "1.2.3".
         assert_eq!(synced[0].version, "");
         assert_eq!(synced[0].size_bytes, 4);
-        assert_eq!(synced[0].launch_shortcut.as_deref(), Some("Ctrl+F1"));
+        assert_eq!(
+            synced[0].launch_script.launch_shortcut.as_deref(),
+            Some("Ctrl+F1")
+        );
         assert_eq!(
             synced[0].watched_exe.as_deref(),
             Some("C:\\Games\\Game.exe")
@@ -1030,12 +1032,9 @@ mod tests {
             filename: "gone.exe".to_string(),
             version: String::new(),
             size_bytes: 0,
-            game_exe: None,
-            game_args: None,
+            launch_script: LaunchScriptConfig::default(),
             watched_exe: None,
-            launch_shortcut: None,
             default_cheats: Vec::new(),
-            close_after_launch: false,
         }];
 
         let synced = sync_trainer_configs(&existing, &dir).unwrap();
