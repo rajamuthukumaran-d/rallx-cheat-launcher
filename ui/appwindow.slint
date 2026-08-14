@@ -112,8 +112,9 @@ export component AppWindow inherits Window {
     // AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
     // Left/right position within the current form-focused-index row, for
-    // rows with more than one field/button (a cheat row's label/record/
-    // remove, or the final Cancel/Save row). Reset to 0 on every row change.
+    // rows with more than one field/button (an executable field's browse/clear,
+    // a cheat row's label/record/remove, or the final Cancel/Save row). Reset
+    // to 0 on every row change.
     in-out property <int> form-sub-index: 0;
 
     in-out property <bool> recording: false;
@@ -282,10 +283,12 @@ export component AppWindow inherits Window {
     }
 
     // How many fields/buttons share the current form-focused-index row: 3 for
-    // a cheat row (label, record key, remove), 2 for the final Cancel/Save
-    // row, 1 everywhere else.
+    // a cheat row (label, record key, remove), 2 for a populated executable
+    // row (browse, clear) or the final Cancel/Save row, 1 everywhere else.
     function form-sub-count() -> int {
-        if root.form-focused-index == 6 && !root.form-watched-exe-path.is-empty {
+        if root.form-focused-index == 3 && !root.form-game-exe-path.is-empty {
+            return 2;
+        } else if root.form-focused-index == 6 && !root.form-watched-exe-path.is-empty {
             return 2;
         } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
             return 3;
@@ -750,7 +753,11 @@ export component AppWindow inherits Window {
         } else if root.form-focused-index == 2 {
             root.toggle-game-section();
         } else if root.form-focused-index == 3 {
-            root.browse-game-exe();
+            if root.form-sub-index == 0 {
+                root.browse-game-exe();
+            } else {
+                root.clear-game-exe();
+            }
         } else if root.form-focused-index == 4 {
             if via-gamepad {
                 root.open-keyboard("game-args", -1, root.form-game-args);
@@ -925,6 +932,7 @@ export component AppWindow inherits Window {
     callback browse-folder();
     callback browse-exe();
     callback browse-game-exe();
+    callback clear-game-exe();
     callback browse-watched-exe();
     callback clear-watched-exe();
     // Writes the game's launch .bat next to the game executable. Handled in
@@ -1082,6 +1090,7 @@ export component AppWindow inherits Window {
             name-changed(v) => { root.form-name = v; }
             browse-exe => { root.browse-exe(); }
             browse-game-exe => { root.browse-game-exe(); }
+            clear-game-exe => { root.clear-game-exe(); }
             browse-watched-exe => { root.browse-watched-exe(); }
             clear-watched-exe => { root.clear-watched-exe(); }
             game-args-changed(v) => { root.form-game-args = v; }

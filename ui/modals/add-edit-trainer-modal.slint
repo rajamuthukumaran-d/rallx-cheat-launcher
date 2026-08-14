@@ -263,6 +263,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     callback name-changed(string);
     callback browse-exe();
     callback browse-game-exe();
+    callback clear-game-exe();
     callback browse-watched-exe();
     callback clear-watched-exe();
     callback game-args-changed(string);
@@ -420,9 +421,12 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             vertical-stretch: 0;
                             label-text: "Game executable";
                             value-text: root.form-game-exe-display;
-                            highlighted: root.focused-index == 3;
+                            highlighted: root.focused-index == 3 && root.sub-index == 0;
+                            clear-highlighted: root.focused-index == 3 && root.sub-index == 1;
+                            can-clear: root.form-game-exe-display != "No game selected";
                             shown: root.game-expanded;
                             browse => { root.browse-game-exe(); }
+                            clear => { root.clear-game-exe(); }
                         }
 
                         if root.game-expanded: VerticalLayout {

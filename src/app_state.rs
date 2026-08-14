@@ -1015,6 +1015,15 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
 
     {
         let app_weak = app.as_weak();
+        app.on_clear_game_exe(move || {
+            let app = app_weak.unwrap();
+            app.set_form_game_exe_path("".into());
+            app.set_form_game_exe_display(NO_GAME_PLACEHOLDER.into());
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
         app.on_browse_watched_exe(move || {
             let app = app_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
