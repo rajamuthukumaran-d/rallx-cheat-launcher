@@ -132,9 +132,10 @@ pub struct TrainerConfig {
     /// never starts the game. `default` because configs predate the field.
     #[serde(default)]
     pub game_args: Option<String>,
-    /// Executable whose lifetime controls cleanup for this trainer. Once a
-    /// process with this executable name has been seen and then exits, Rallx
-    /// terminates the trainer it launched and exits too.
+    /// Executable used to match the running game when the global shortcut is
+    /// pressed. Its lifetime also controls cleanup: once this exact executable
+    /// has been seen and then exits, Rallx terminates the trainer it launched
+    /// and exits too.
     #[serde(default)]
     pub watched_exe: Option<String>,
     pub launch_shortcut: Option<String>,

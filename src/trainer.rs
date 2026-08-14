@@ -556,6 +556,13 @@ pub fn wait_for_watched_exe_exit(
     }
 }
 
+/// Returns whether an instance of this exact executable is currently running.
+/// The full path is compared, so two unrelated games with the same executable
+/// filename cannot select each other's trainer.
+pub fn watched_exe_is_running(watched_exe: &Path) -> Result<bool, std::io::Error> {
+    process_path_is_running(&watched_exe.canonicalize()?)
+}
+
 fn process_path_is_running(watched_exe: &Path) -> Result<bool, std::io::Error> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use windows::Win32::Foundation::HANDLE;

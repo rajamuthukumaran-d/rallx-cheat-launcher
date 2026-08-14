@@ -408,7 +408,7 @@ pub fn run(
     let plan = Arc::new(plan(options, &config)?);
     let state = Arc::new(TriggerState::default());
 
-    app_state::wire(&app, config);
+    app_state::wire(&app, config, app_state::AppMode::Background);
     // The window stays hidden until the tray asks for it; closing it returns to
     // the tray rather than ending the process, which is what keeps the hotkey
     // alive. "Exit" in the tray menu is the way out.

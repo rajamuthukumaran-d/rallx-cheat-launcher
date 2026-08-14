@@ -204,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = create_window()?;
 
-    app_state::wire(&app, config);
+    app_state::wire(&app, config, app_state::AppMode::Windowed);
     gamepad::spawn_listener(app.as_weak());
 
     // Shown explicitly rather than through app.run() because the window has no

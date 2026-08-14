@@ -1,21 +1,22 @@
 #![allow(dead_code)]
 
-// UI-only prototype state: an in-memory trainer list wired to the Slint UI so
-// every screen (Home, Settings, Add/Edit, Delete confirm, key recorder) is
-// fully interactive. Trainer folder selection and discovery are real
-// (see trainer::sync_trainer_configs); launching and hotkey registration are
-// not wired up yet - see trainer.rs/hotkey.rs for those.
+// In-memory trainer state and the Rust side of the Slint callback wiring.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
-use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
+use slint::{
+    Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
+};
 
 use crate::config::{AppConfig, CheatConfig, TrainerConfig};
 use crate::{
-    clipboard, elevate, exe_icon, exe_version, keys, launch_args, trainer, AppWindow, CheatEntry,
-    Palette, Theme, TrainerItem,
+    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
+    CheatEntry, Palette, Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -24,6 +25,19 @@ const NO_EXE_PLACEHOLDER: &str = "No executable selected";
 const NO_GAME_PLACEHOLDER: &str = "No game selected";
 const NO_WATCHED_EXE_PLACEHOLDER: &str = "No app selected";
 const NOT_SET: &str = "Not set";
+const GLOBAL_HOTKEY_POLL: Duration = Duration::from_millis(50);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Windowed,
+    Background,
+}
+
+struct RegisteredWindowHotkey {
+    canonical: String,
+    id: u32,
+    _manager: hotkey::HotkeyManager,
+}
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
     (0x5b, 0x8c, 0xff),
@@ -39,6 +53,9 @@ struct AppState {
     next_trainer_id: Cell<i32>,
     next_cheat_id: Cell<i32>,
     config: RefCell<AppConfig>,
+    window_hotkey: RefCell<Option<RegisteredWindowHotkey>>,
+    hotkey_poll_timer: Timer,
+    hotkey_scan_in_progress: Arc<AtomicBool>,
 }
 
 fn row_color(index: usize) -> Color {
@@ -536,12 +553,140 @@ fn build_launch_script(trainer: &TrainerItem, close_after_launch: bool) -> Launc
     }
 }
 
-pub fn wire(app: &AppWindow, config: AppConfig) {
+fn sync_window_hotkey(state: &AppState) -> Result<(), String> {
+    let desired = state
+        .config
+        .borrow()
+        .default_shortcut
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(keys::parse_combo)
+        .transpose()
+        .map_err(|err| format!("The default launch shortcut is invalid: {err}"))?;
+    let desired_canonical = desired.as_ref().map(keys::KeyCombo::canonical);
+
+    if state
+        .window_hotkey
+        .borrow()
+        .as_ref()
+        .map(|registered| registered.canonical.as_str())
+        == desired_canonical.as_deref()
+    {
+        return Ok(());
+    }
+
+    *state.window_hotkey.borrow_mut() = None;
+    let Some(combo) = desired else {
+        return Ok(());
+    };
+
+    let canonical = combo.canonical();
+    let mut manager = hotkey::HotkeyManager::new()?;
+    let id = manager.register(&combo)?;
+    *state.window_hotkey.borrow_mut() = Some(RegisteredWindowHotkey {
+        canonical,
+        id,
+        _manager: manager,
+    });
+    Ok(())
+}
+
+fn find_matching_watched_trainer<F>(
+    candidates: &[(i32, PathBuf)],
+    mut is_running: F,
+) -> Result<Option<i32>, std::io::Error>
+where
+    F: FnMut(&Path) -> Result<bool, std::io::Error>,
+{
+    let mut first_error = None;
+    for (id, watched_exe) in candidates {
+        match is_running(watched_exe) {
+            Ok(true) => return Ok(Some(*id)),
+            Ok(false) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) if first_error.is_none() => first_error = Some(err),
+            Err(_) => {}
+        }
+    }
+
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(None),
+    }
+}
+
+fn start_window_hotkey_poll(app: &AppWindow, state: &Rc<AppState>) {
+    let app_weak = app.as_weak();
+    let state_weak = Rc::downgrade(state);
+
+    state
+        .hotkey_poll_timer
+        .start(TimerMode::Repeated, GLOBAL_HOTKEY_POLL, move || {
+            let pressed = hotkey::drain_pressed();
+            let Some(state) = state_weak.upgrade() else {
+                return;
+            };
+            let registered_id = state
+                .window_hotkey
+                .borrow()
+                .as_ref()
+                .map(|registered| registered.id);
+            if !registered_id.is_some_and(|id| pressed.contains(&id)) {
+                return;
+            }
+
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            // Recording the configured shortcut necessarily emits its global
+            // event too. Drain it above, but never turn that recording action
+            // into an accidental trainer launch.
+            if app.get_recording() || state.hotkey_scan_in_progress.swap(true, Ordering::SeqCst) {
+                return;
+            }
+
+            let candidates = state
+                .trainers
+                .borrow()
+                .iter()
+                .filter_map(|item| {
+                    let watched_exe = item.watched_exe.trim();
+                    (!watched_exe.is_empty()).then(|| (item.id, PathBuf::from(watched_exe)))
+                })
+                .collect::<Vec<_>>();
+            let result_weak = app.as_weak();
+            let scan_in_progress = state.hotkey_scan_in_progress.clone();
+
+            std::thread::spawn(move || {
+                let result =
+                    find_matching_watched_trainer(&candidates, trainer::watched_exe_is_running);
+                let _ = slint::invoke_from_event_loop(move || {
+                    scan_in_progress.store(false, Ordering::SeqCst);
+                    let Some(app) = result_weak.upgrade() else {
+                        return;
+                    };
+                    match result {
+                        Ok(Some(id)) => app.invoke_launch_trainer(id),
+                        Ok(None) => show_toast(&app, "No running game matches a trainer"),
+                        Err(err) => {
+                            show_toast(&app, format!("Could not identify the running game: {err}"))
+                        }
+                    }
+                });
+            });
+        });
+}
+
+pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
     let state = Rc::new(AppState {
         trainers: RefCell::new(Vec::new()),
         next_trainer_id: Cell::new(1),
         next_cheat_id: Cell::new(100),
         config: RefCell::new(config),
+        window_hotkey: RefCell::new(None),
+        hotkey_poll_timer: Timer::default(),
+        hotkey_scan_in_progress: Arc::new(AtomicBool::new(false)),
     });
 
     let items = rescan_trainer_folder(&state);
@@ -559,6 +704,13 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     // re-checked whenever Settings opens.
     app.set_is_elevated(elevate::is_elevated());
     apply_settings_to_ui(app, &state.config.borrow());
+
+    if mode == AppMode::Windowed {
+        if let Err(err) = sync_window_hotkey(&state) {
+            show_toast(app, err);
+        }
+        start_window_hotkey_poll(app, &state);
+    }
 
     app.on_quit_app(|| {
         let _ = slint::quit_event_loop();
@@ -591,6 +743,11 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         app.on_settings_changed(move || {
             let app = app_weak.unwrap();
             persist_settings_from_ui(&app, &state);
+            if mode == AppMode::Windowed {
+                if let Err(err) = sync_window_hotkey(&state) {
+                    show_toast(&app, err);
+                }
+            }
         });
     }
 
@@ -1294,5 +1451,49 @@ mod tests {
         assert_eq!(built.dropped, ["shortcut \"banana\"", "Ammo \"durian\""]);
         assert!(!built.script.contains("--hotkey"));
         assert!(built.script.contains("--defaultcheat=\"Ctrl+Numpad1\""));
+    }
+
+    #[test]
+    fn global_hotkey_selects_the_first_running_watched_executable() {
+        let candidates = vec![
+            (10, PathBuf::from(r"C:\Games\First.exe")),
+            (20, PathBuf::from(r"C:\Games\Second.exe")),
+            (30, PathBuf::from(r"C:\Games\Third.exe")),
+        ];
+        let mut checked = Vec::new();
+
+        let matched = find_matching_watched_trainer(&candidates, |path| {
+            checked.push(path.to_path_buf());
+            Ok(path.ends_with("Second.exe"))
+        })
+        .unwrap();
+
+        assert_eq!(matched, Some(20));
+        assert_eq!(
+            checked,
+            candidates[..2]
+                .iter()
+                .map(|(_, path)| path.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_deleted_watched_executable_does_not_block_another_match() {
+        let candidates = vec![
+            (10, PathBuf::from(r"C:\Games\Deleted.exe")),
+            (20, PathBuf::from(r"C:\Games\Running.exe")),
+        ];
+
+        let matched = find_matching_watched_trainer(&candidates, |path| {
+            if path.ends_with("Deleted.exe") {
+                Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+            } else {
+                Ok(true)
+            }
+        })
+        .unwrap();
+
+        assert_eq!(matched, Some(20));
     }
 }
