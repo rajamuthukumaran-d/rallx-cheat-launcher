@@ -149,13 +149,26 @@ component ExeField inherits Rectangle {
 
                 Text {
                     x: 14px;
-                    width: parent.width - 28px;
+                    width: parent.width - (root.can-clear ? 58px : 28px);
                     height: 100%;
                     vertical-alignment: center;
                     text: root.value-text;
                     color: Theme.text-dim;
                     font-size: 15px;
                     overflow: elide;
+                }
+
+                if root.can-clear: IconButton {
+                    x: parent.width - self.width - 4px;
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("../../assets/images/icons/close.svg");
+                    icon-size: root.clear-highlighted ? 17px : 14px;
+                    button-size: 36px;
+                    bordered: false;
+                    button-bg: transparent;
+                    icon-color: root.clear-highlighted ? Theme.accent : Theme.text-dim;
+                    tooltip-text: "Clear selected app";
+                    clicked => { root.clear(); }
                 }
             }
 
@@ -181,29 +194,6 @@ component ExeField inherits Rectangle {
                 }
 
                 TouchArea { clicked => { root.browse(); } }
-            }
-
-            if root.can-clear: Rectangle {
-                background: Theme.panel2;
-                border-width: 1px;
-                border-color: root.clear-highlighted ? Theme.accent : Theme.border;
-                border-radius: 8px;
-                height: 44px;
-                width: clear-lay.min-width;
-
-                clear-lay := HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
-                    alignment: center;
-                    Text {
-                        text: "Clear";
-                        color: root.clear-highlighted ? Theme.accent : Theme.text;
-                        font-size: 14px;
-                        font-weight: root.clear-highlighted ? 700 : 600;
-                    }
-                }
-
-                TouchArea { clicked => { root.clear(); } }
             }
         }
     }
