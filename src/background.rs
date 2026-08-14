@@ -46,6 +46,7 @@ pub struct BackgroundPlan {
     pub hotkey: Option<KeyCombo>,
     pub cheats: Vec<KeyCombo>,
     pub close_after_launch: bool,
+    pub watched_exe: Option<PathBuf>,
 }
 
 /// Resolves launch options against config.json: unspecified values fall back to
@@ -150,6 +151,9 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
         hotkey,
         cheats,
         close_after_launch: options.close_after_launch,
+        watched_exe: saved
+            .and_then(|entry| entry.watched_exe.as_deref())
+            .map(PathBuf::from),
     })
 }
 
@@ -172,6 +176,8 @@ struct TriggerState {
     /// `trigger` returns, leaving a window where a restart would launch the
     /// trainer a second time.
     attempted: AtomicBool,
+    /// Only one lifecycle watcher may own cleanup for the tracked trainer.
+    watcher_started: AtomicBool,
 }
 
 /// Clears [`TriggerState::running`] however the sequence ends, including an
@@ -255,7 +261,14 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
             },
             None => false,
         };
-        let launched_now = force_launch || !trainer_running;
+        // A trainer with lifecycle cleanup must remain the single process held
+        // in state, otherwise a second explicit launch would replace its
+        // handle and leave the first process behind when the watched app exits.
+        let launched_now = if plan.watched_exe.is_some() {
+            !trainer_running
+        } else {
+            force_launch || !trainer_running
+        };
 
         if launched_now {
             match trainer::launch_trainer(&plan.folder, &plan.filename) {
@@ -332,7 +345,47 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
             crate::dialog::error(&format!("Could not send {}", failed.join(", ")));
         }
 
-        if plan.close_after_launch {
+        if launched_now {
+            if let Some(watched_exe) = plan.watched_exe.clone() {
+                if !state.watcher_started.swap(true, Ordering::SeqCst) {
+                    let state = state.clone();
+                    std::thread::spawn(move || {
+                        let watch_result = trainer::wait_for_watched_exe_exit(
+                            &watched_exe,
+                            Duration::from_millis(500),
+                        );
+
+                        match watch_result {
+                            Ok(()) => {
+                                let mut launched =
+                                    state.trainer.lock().unwrap_or_else(|err| err.into_inner());
+                                let cleanup_result = match launched.as_mut() {
+                                    Some(process) => process.terminate(),
+                                    None => Ok(()),
+                                };
+                                if let Err(err) = cleanup_result {
+                                    eprintln!("Could not close the launched trainer: {err}");
+                                }
+                                let _ = slint::invoke_from_event_loop(|| {
+                                    let _ = slint::quit_event_loop();
+                                });
+                            }
+                            Err(err) => {
+                                state.watcher_started.store(false, Ordering::SeqCst);
+                                crate::dialog::error(&format!(
+                                    "Could not watch {}: {err}",
+                                    watched_exe.display()
+                                ));
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        // Lifecycle cleanup has to keep Rallx alive until the watched app
+        // exits, so it takes precedence over the immediate CLI close flag.
+        if plan.close_after_launch && plan.watched_exe.is_none() {
             let _ = slint::invoke_from_event_loop(|| {
                 let _ = slint::quit_event_loop();
             });
@@ -477,6 +530,7 @@ mod tests {
                 size_bytes: 3,
                 game_exe: None,
                 game_args: None,
+                watched_exe: Some("C:\\Games\\RDR2.exe".to_string()),
                 launch_shortcut: Some("Insert".to_string()),
                 default_cheats: vec![
                     CheatConfig {
@@ -520,6 +574,7 @@ mod tests {
         let cheats: Vec<String> = plan.cheats.iter().map(KeyCombo::canonical).collect();
         assert_eq!(cheats, ["Numpad1", "Ctrl+Numpad2"]);
         assert!(plan.close_after_launch);
+        assert_eq!(plan.watched_exe, Some(PathBuf::from("C:\\Games\\RDR2.exe")));
     }
 
     #[test]

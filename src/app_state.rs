@@ -22,6 +22,7 @@ use crate::{
 // save path treats as "nothing configured" when writing config.json.
 const NO_EXE_PLACEHOLDER: &str = "No executable selected";
 const NO_GAME_PLACEHOLDER: &str = "No game selected";
+const NO_WATCHED_EXE_PLACEHOLDER: &str = "No app selected";
 const NOT_SET: &str = "Not set";
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
@@ -62,6 +63,7 @@ struct NewTrainer<'a> {
     exe: &'a str,
     game_exe: &'a str,
     game_args: &'a str,
+    watched_exe: &'a str,
     shortcut: &'a str,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
@@ -86,6 +88,7 @@ fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
         exe: fields.exe.into(),
         game_exe: fields.game_exe.into(),
         game_args: fields.game_args.into(),
+        watched_exe: fields.watched_exe.into(),
         shortcut: fields.shortcut.into(),
         color,
         letter: letter.into(),
@@ -132,6 +135,7 @@ fn config_to_trainer_item(
             exe: &cfg.filename,
             game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
             game_args: cfg.game_args.as_deref().unwrap_or_default(),
+            watched_exe: cfg.watched_exe.as_deref().unwrap_or_default(),
             shortcut: &shortcut,
             cheats,
             icon,
@@ -260,6 +264,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_game_exe_path("".into());
     app.set_form_game_args("".into());
     app.set_form_game_expanded(false);
+    app.set_form_watched_exe_display(NO_WATCHED_EXE_PLACEHOLDER.into());
+    app.set_form_watched_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
@@ -333,6 +339,12 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     // Opened only when there's something in it, so the section stays out of the
     // way for the trainers that have no game configured.
     app.set_form_game_expanded(!trainer.game_exe.is_empty());
+    app.set_form_watched_exe_path(trainer.watched_exe.clone());
+    app.set_form_watched_exe_display(if trainer.watched_exe.is_empty() {
+        NO_WATCHED_EXE_PLACEHOLDER.into()
+    } else {
+        trainer.watched_exe.clone()
+    });
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
@@ -345,31 +357,37 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
 /// the config entry for `filename`, creating that entry when the trainer was
 /// only just imported. Version and size are left empty for the folder rescan
 /// to fill in from the exe itself.
-fn apply_form_to_config(
-    state: &AppState,
-    filename: &str,
-    name: &str,
-    game_exe: &str,
-    game_args: &str,
-    shortcut: &str,
-    cheats: &[CheatEntry],
-) {
-    let launch_shortcut = match shortcut.trim() {
+struct TrainerFormValues<'a> {
+    name: &'a str,
+    game_exe: &'a str,
+    game_args: &'a str,
+    watched_exe: &'a str,
+    shortcut: &'a str,
+    cheats: &'a [CheatEntry],
+}
+
+fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValues<'_>) {
+    let launch_shortcut = match form.shortcut.trim() {
         "" | NOT_SET => None,
         combo => Some(keys::canonicalize_combo(combo)),
     };
-    let game_exe = match game_exe.trim() {
+    let game_exe = match form.game_exe.trim() {
         "" | NO_GAME_PLACEHOLDER => None,
         path => Some(path.to_string()),
     };
     // Launch options belong to the game, so they go with it rather than
     // outliving a cleared game field.
-    let game_args = match game_args.trim() {
+    let game_args = match form.game_args.trim() {
         "" => None,
         args if game_exe.is_some() => Some(args.to_string()),
         _ => None,
     };
-    let default_cheats: Vec<CheatConfig> = cheats
+    let watched_exe = match form.watched_exe.trim() {
+        "" | NO_WATCHED_EXE_PLACEHOLDER => None,
+        path => Some(path.to_string()),
+    };
+    let default_cheats: Vec<CheatConfig> = form
+        .cheats
         .iter()
         .map(|cheat| CheatConfig {
             label: cheat.label.to_string(),
@@ -382,19 +400,21 @@ fn apply_form_to_config(
 
     let mut config = state.config.borrow_mut();
     if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
-        entry.name = name.to_string();
+        entry.name = form.name.to_string();
         entry.game_exe = game_exe;
         entry.game_args = game_args;
+        entry.watched_exe = watched_exe;
         entry.launch_shortcut = launch_shortcut;
         entry.default_cheats = default_cheats;
     } else {
         config.trainers.push(TrainerConfig {
-            name: name.to_string(),
+            name: form.name.to_string(),
             filename: filename.to_string(),
             version: String::new(),
             size_bytes: 0,
             game_exe,
             game_args,
+            watched_exe,
             launch_shortcut,
             default_cheats,
             close_after_launch: false,
@@ -602,11 +622,55 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             // event loop.
             let name = trainer.name.to_string();
             let exe = trainer.exe.to_string();
+            let watched_exe = trainer.watched_exe.to_string();
             let close_after_launch = app.get_close_after_launch();
             let result_weak = app.as_weak();
 
             std::thread::spawn(move || {
-                let result = trainer::launch_trainer(&folder, &exe);
+                let mut result = trainer::launch_trainer(&folder, &exe);
+
+                if let Ok(process) = result.as_mut() {
+                    if !watched_exe.is_empty() {
+                        let launched_weak = result_weak.clone();
+                        let launched_name = name.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(app) = launched_weak.upgrade() {
+                                show_toast(
+                                    &app,
+                                    format!("Launched {launched_name} - waiting for the selected app to close"),
+                                );
+                            }
+                        });
+
+                        let watch_result = trainer::wait_for_watched_exe_exit(
+                            Path::new(&watched_exe),
+                            std::time::Duration::from_millis(500),
+                        );
+                        match watch_result {
+                            Ok(()) => {
+                                let cleanup_result = process.terminate();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Err(err) = cleanup_result {
+                                        eprintln!("Could not close the launched trainer: {err}");
+                                    }
+                                    let _ = slint::quit_event_loop();
+                                });
+                            }
+                            Err(err) => {
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(app) = result_weak.upgrade() {
+                                        show_toast(
+                                            &app,
+                                            format!("Could not watch the selected app: {err}"),
+                                        );
+                                    }
+                                });
+                            }
+                        }
+                        return;
+                    }
+                }
+
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(app) = result_weak.upgrade() else {
                         return;
@@ -754,6 +818,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             let shortcut = app.get_form_shortcut().to_string();
             let game_exe = app.get_form_game_exe_path().to_string();
             let game_args = app.get_form_game_args().to_string();
+            let watched_exe = app.get_form_watched_exe_path().to_string();
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
@@ -788,11 +853,14 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             apply_form_to_config(
                 &state,
                 &filename,
-                name.trim(),
-                &game_exe,
-                &game_args,
-                &shortcut,
-                &cheats,
+                TrainerFormValues {
+                    name: name.trim(),
+                    game_exe: &game_exe,
+                    game_args: &game_args,
+                    watched_exe: &watched_exe,
+                    shortcut: &shortcut,
+                    cheats: &cheats,
+                },
             );
 
             let items = rescan_trainer_folder(&state);
@@ -947,6 +1015,37 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
 
     {
         let app_weak = app.as_weak();
+        app.on_browse_watched_exe(move || {
+            let app = app_weak.unwrap();
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("Executable", &["exe"])
+                .pick_file()
+            else {
+                return;
+            };
+
+            match trainer::validate_watched_exe(&path) {
+                Ok(path) => {
+                    let display = path.to_string_lossy().to_string();
+                    app.set_form_watched_exe_path(display.clone().into());
+                    app.set_form_watched_exe_display(display.into());
+                }
+                Err(err) => show_toast(&app, err.to_string()),
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        app.on_clear_watched_exe(move || {
+            let app = app_weak.unwrap();
+            app.set_form_watched_exe_path("".into());
+            app.set_form_watched_exe_display(NO_WATCHED_EXE_PLACEHOLDER.into());
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
         let state = state.clone();
         app.on_generate_game_bat(move || {
             let app = app_weak.unwrap();
@@ -1010,6 +1109,17 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 "game" => {
                     match trainer::resolve_game_selection(&path) {
                         Ok(selection) => set_form_game_exe(&app, &selection),
+                        Err(err) => show_toast(&app, err.to_string()),
+                    }
+                    return;
+                }
+                "watched" => {
+                    match trainer::validate_watched_exe(&path) {
+                        Ok(path) => {
+                            let display = path.to_string_lossy().to_string();
+                            app.set_form_watched_exe_path(display.clone().into());
+                            app.set_form_watched_exe_display(display.into());
+                        }
                         Err(err) => show_toast(&app, err.to_string()),
                     }
                     return;
@@ -1111,6 +1221,7 @@ mod tests {
             exe: "rdr2-trainer.exe".into(),
             game_exe: "".into(),
             game_args: "".into(),
+            watched_exe: "".into(),
             shortcut: shortcut.into(),
             color: Color::from_rgb_u8(0, 0, 0),
             letter: "R".into(),

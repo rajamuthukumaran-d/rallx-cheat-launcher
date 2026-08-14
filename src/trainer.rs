@@ -87,6 +87,31 @@ pub enum GameExeError {
     ShortcutTargetNotAnExe,
 }
 
+#[derive(Debug)]
+pub enum WatchedExeError {
+    NotAnExe,
+    NotFound,
+}
+
+impl fmt::Display for WatchedExeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAnExe => write!(f, "Only an .exe file can be watched"),
+            Self::NotFound => write!(f, "That executable no longer exists"),
+        }
+    }
+}
+
+pub fn validate_watched_exe(path: &Path) -> Result<std::path::PathBuf, WatchedExeError> {
+    if !is_exe(path) {
+        return Err(WatchedExeError::NotAnExe);
+    }
+    if !path.is_file() {
+        return Err(WatchedExeError::NotFound);
+    }
+    Ok(path.to_path_buf())
+}
+
 impl fmt::Display for GameExeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -448,6 +473,22 @@ impl LaunchedTrainer {
         }
     }
 
+    /// Stops only the trainer process represented by this handle. The watched
+    /// executable is never terminated; its exit is merely the cleanup signal.
+    pub fn terminate(&mut self) -> Result<(), std::io::Error> {
+        if !self.is_running()? {
+            return Ok(());
+        }
+
+        match &mut self.process {
+            ProcessHandle::Direct(child) => child.kill(),
+            ProcessHandle::Elevated(_) => unsafe {
+                windows::Win32::System::Threading::TerminateProcess(self.process.raw(), 0)
+                    .map_err(|err| std::io::Error::other(err.message()))
+            },
+        }
+    }
+
     /// Waits for the trainer's GUI thread to finish its initial input setup.
     /// `Ok(false)` means the timeout elapsed; callers may still continue after
     /// a grace period because some programs never expose a standard GUI queue.
@@ -489,6 +530,69 @@ impl LaunchedTrainer {
         unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_process_id)) };
         if foreground_process_id == process_id {
             let _ = unsafe { ShowWindow(foreground, SW_MINIMIZE) };
+        }
+    }
+}
+
+/// Waits until a process with the selected executable name has existed and all
+/// instances of it have then exited. Waiting for the first sighting prevents a
+/// trainer launch from immediately cleaning itself up when the game/app is
+/// configured but has not started yet.
+pub fn wait_for_watched_exe_exit(
+    watched_exe: &Path,
+    poll_interval: std::time::Duration,
+) -> Result<(), std::io::Error> {
+    let filename = watched_exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid executable name")
+        })?;
+    let mut seen_running = false;
+
+    loop {
+        let running = process_name_is_running(filename)?;
+        if running {
+            seen_running = true;
+        } else if seen_running {
+            return Ok(());
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
+
+fn process_name_is_running(filename: &str) -> Result<bool, std::io::Error> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
+        .map_err(|err| std::io::Error::other(err.message()))?;
+    let snapshot = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(snapshot.0) };
+    let raw = HANDLE(snapshot.as_raw_handle());
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
+    if unsafe { Process32FirstW(raw, &mut entry) }.is_err() {
+        return Ok(false);
+    }
+
+    loop {
+        let end = entry
+            .szExeFile
+            .iter()
+            .position(|&character| character == 0)
+            .unwrap_or(entry.szExeFile.len());
+        if String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case(filename) {
+            return Ok(true);
+        }
+        if unsafe { Process32NextW(raw, &mut entry) }.is_err() {
+            return Ok(false);
         }
     }
 }
@@ -613,6 +717,7 @@ pub fn sync_trainer_configs(
                 size_bytes: info.size_bytes,
                 game_exe: None,
                 game_args: None,
+                watched_exe: None,
                 launch_shortcut: None,
                 default_cheats: Vec::new(),
                 close_after_launch: false,
@@ -629,6 +734,14 @@ mod tests {
 
     fn write_exe(dir: &Path, name: &str, contents: &[u8]) {
         std::fs::write(dir.join(name), contents).unwrap();
+    }
+
+    #[test]
+    fn process_snapshot_finds_the_current_executable() {
+        let current = std::env::current_exe().unwrap();
+        let filename = current.file_name().and_then(|name| name.to_str()).unwrap();
+
+        assert!(process_name_is_running(filename).unwrap());
     }
 
     #[test]
@@ -799,6 +912,7 @@ mod tests {
             size_bytes: 0,
             game_exe: Some("Game.exe".to_string()),
             game_args: None,
+            watched_exe: Some("C:\\Games\\Game.exe".to_string()),
             launch_shortcut: Some("Ctrl+F1".to_string()),
             default_cheats: vec![crate::config::CheatConfig {
                 label: "Infinite Health".to_string(),
@@ -819,6 +933,10 @@ mod tests {
         assert_eq!(synced[0].version, "");
         assert_eq!(synced[0].size_bytes, 4);
         assert_eq!(synced[0].launch_shortcut.as_deref(), Some("Ctrl+F1"));
+        assert_eq!(
+            synced[0].watched_exe.as_deref(),
+            Some("C:\\Games\\Game.exe")
+        );
     }
 
     #[test]
@@ -834,6 +952,7 @@ mod tests {
             size_bytes: 0,
             game_exe: None,
             game_args: None,
+            watched_exe: None,
             launch_shortcut: None,
             default_cheats: Vec::new(),
             close_after_launch: false,

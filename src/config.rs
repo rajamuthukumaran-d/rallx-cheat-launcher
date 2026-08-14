@@ -132,6 +132,11 @@ pub struct TrainerConfig {
     /// never starts the game. `default` because configs predate the field.
     #[serde(default)]
     pub game_args: Option<String>,
+    /// Executable whose lifetime controls cleanup for this trainer. Once a
+    /// process with this executable name has been seen and then exits, Rallx
+    /// terminates the trainer it launched and exits too.
+    #[serde(default)]
+    pub watched_exe: Option<String>,
     pub launch_shortcut: Option<String>,
     pub default_cheats: Vec<CheatConfig>,
     pub close_after_launch: bool,
@@ -285,5 +290,26 @@ mod tests {
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());
         assert!(loaded.theme.is_compact());
+    }
+
+    #[test]
+    fn older_trainer_configs_default_to_no_watched_executable() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "trainers": [{
+                    "name": "Trainer",
+                    "filename": "trainer.exe",
+                    "version": "1.0",
+                    "size_bytes": 1,
+                    "game_exe": null,
+                    "launch_shortcut": null,
+                    "default_cheats": [],
+                    "close_after_launch": false
+                }]
+            }"#,
+        )
+        .expect("parses");
+
+        assert_eq!(config.trainers[0].watched_exe, None);
     }
 }
