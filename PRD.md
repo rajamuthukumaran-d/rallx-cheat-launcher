@@ -27,12 +27,14 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 ## Settings:
 - It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
 - Theme will have accent, background and style
-- Option to close the app after launching trainer
-- "Run in background" option for normal app mode. When enabled, Rallx starts
+- Option to close the app after launching trainer (off by default)
+- "Run in background" option for normal app mode (off by default). When enabled, Rallx starts
   hidden in the system tray and minimizing its window returns it to the tray,
   while the global shortcut continues matching the running game's watched
   executable. This is separate from `--launch` background mode.
+- Confirm before closing the app is on by default.
 - Option to run as administrator, plus a button to restart into it right away
+    - Run as administrator is on by default.
     - Windows blocks injected key presses aimed at an elevated program, so default cheats only reach a trainer that needs admin rights when the app is elevated too
     - A process cannot elevate itself, so the toggle applies at the next startup and the button relaunches the app through a UAC prompt; the button is disabled when the app is already elevated
 
@@ -47,8 +49,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - Assign shortcut to launch trainer
 - Add list of cheats need to enable (Will be a list containing key or key combination eg, Numpad 1, ctrl + numberpad 3, etc)
 - When adding cheats to enable allow user to enter key or key combination by clicking on a record button
-- An "Auto trigger cheat on launch" toggle. It defaults on for new and existing
-  trainers and reveals a configurable delay in seconds (3 seconds by default).
+- An "Auto trigger cheat on launch" toggle. It defaults off for new trainers
+  and reveals a configurable delay in seconds (3 seconds by default).
   When off, launching skips the default cheats and the next hotkey/launch action
   against the running trainer triggers them.
 

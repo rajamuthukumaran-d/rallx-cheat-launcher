@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use slint::{ComponentHandle, Timer, TimerMode};
 
-use crate::config::{AppConfig, DEFAULT_CHEAT_DELAY_MS};
+use crate::config::{AppConfig, DEFAULT_AUTO_TRIGGER_CHEATS, DEFAULT_CHEAT_DELAY_MS};
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
 use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
@@ -135,11 +135,11 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
             .unwrap_or_default(),
     };
     let (auto_trigger_cheats, cheat_delay_ms) = if options.override_saved {
-        (true, DEFAULT_CHEAT_DELAY_MS)
+        (DEFAULT_AUTO_TRIGGER_CHEATS, DEFAULT_CHEAT_DELAY_MS)
     } else {
         saved
             .map(|entry| (entry.auto_trigger_cheats, entry.cheat_delay_ms))
-            .unwrap_or((true, DEFAULT_CHEAT_DELAY_MS))
+            .unwrap_or((DEFAULT_AUTO_TRIGGER_CHEATS, DEFAULT_CHEAT_DELAY_MS))
     };
 
     Ok(BackgroundPlan {
@@ -655,7 +655,7 @@ mod tests {
         // still what resolves the name for the tray.
         assert_eq!(plan.filename, "rdr2-trainer.exe");
         assert_eq!(plan.display_name, "RDR2");
-        assert!(plan.auto_trigger_cheats);
+        assert!(!plan.auto_trigger_cheats);
         assert_eq!(plan.cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
     }
 
@@ -691,6 +691,7 @@ mod tests {
         assert_eq!(plan.hotkey, None);
         let cheats: Vec<String> = plan.cheats.iter().map(KeyCombo::canonical).collect();
         assert_eq!(cheats, ["Numpad5"]);
+        assert!(!plan.auto_trigger_cheats);
     }
 
     #[test]

@@ -125,11 +125,13 @@ silently violate a requirement from another section.)
   tray while retaining the global running-game hotkey; this remains normal
   mode and is separate from single trainer mode),
   "run as administrator" (applied at next startup) plus a restart-elevated
-  button that is disabled once the process is already elevated.
+  button that is disabled once the process is already elevated. Defaults are:
+  run in background off, close after launch off, confirm before closing on,
+  and run as administrator on.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
   (key/key-combo) entered via a record button that captures live key input. A
-  per-trainer auto-trigger toggle defaults on and reveals a delay field (the
+  per-trainer auto-trigger toggle defaults off and reveals a delay field (the
   existing three-second grace period is the default); when off, the first
   launch skips cheats and the next trigger action sends them. A
   watched executable closes the launched trainer when it exits; Rallx itself

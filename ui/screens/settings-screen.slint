@@ -58,9 +58,9 @@ export component SettingsScreen inherits Rectangle {
     in property <string> folder-path;
     in property <string> default-shortcut-label;
     in-out property <bool> run-in-background: false;
-    in-out property <bool> close-after-launch: true;
+    in-out property <bool> close-after-launch: false;
     in-out property <bool> confirm-exit: true;
-    in-out property <bool> run-as-admin: false;
+    in-out property <bool> run-as-admin: true;
     // Whether *this* process is elevated, which is decided at startup and can't
     // change while it runs - so the restart button is pointless once it's true.
     in property <bool> is-elevated: false;

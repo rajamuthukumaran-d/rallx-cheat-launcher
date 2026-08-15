@@ -36,9 +36,14 @@ fn default_true() -> bool {
 }
 
 pub const DEFAULT_CHEAT_DELAY_MS: u64 = 3_000;
+pub const DEFAULT_AUTO_TRIGGER_CHEATS: bool = false;
 
 fn default_cheat_delay_ms() -> u64 {
     DEFAULT_CHEAT_DELAY_MS
+}
+
+fn default_auto_trigger_cheats() -> bool {
+    DEFAULT_AUTO_TRIGGER_CHEATS
 }
 
 fn default_launch_shortcut() -> Option<String> {
@@ -154,7 +159,7 @@ pub struct TrainerConfig {
     /// Whether the first action that launches this trainer also sends its
     /// default cheats. When disabled, a later hotkey/action against the
     /// already-running trainer sends them instead.
-    #[serde(default = "default_true")]
+    #[serde(default = "default_auto_trigger_cheats")]
     pub auto_trigger_cheats: bool,
     /// Extra time after the trainer reports that its UI is ready before the
     /// launch-time default cheats are sent.
@@ -171,7 +176,7 @@ pub struct AppConfig {
     pub default_shortcut: Option<String>,
     #[serde(default)]
     pub theme: ThemeConfig,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub close_after_launch_global: bool,
     #[serde(default = "default_true")]
     pub confirm_exit: bool,
@@ -180,10 +185,8 @@ pub struct AppConfig {
     /// launch-option background mode, which targets one configured trainer.
     #[serde(default)]
     pub run_in_background: bool,
-    /// Whether startup should hand off to an elevated copy of the app. Off by
-    /// default: elevation is only needed to reach trainers that run elevated
-    /// themselves, and it costs a UAC prompt every launch.
-    #[serde(default)]
+    /// Whether startup should hand off to an elevated copy of the app.
+    #[serde(default = "default_true")]
     pub run_as_admin: bool,
     #[serde(default)]
     pub trainers: Vec<TrainerConfig>,
@@ -195,10 +198,10 @@ impl Default for AppConfig {
             trainer_folder: None,
             default_shortcut: default_launch_shortcut(),
             theme: ThemeConfig::default(),
-            close_after_launch_global: true,
+            close_after_launch_global: false,
             confirm_exit: true,
             run_in_background: false,
-            run_as_admin: false,
+            run_as_admin: true,
             trainers: Vec::new(),
         }
     }
@@ -282,16 +285,14 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{"trainer_folder":"C:\\trainers"}"#).expect("parses");
         assert_eq!(config.trainer_folder, Some(PathBuf::from("C:\\trainers")));
-        assert!(config.close_after_launch_global);
+        assert!(!config.close_after_launch_global);
         assert!(config.confirm_exit);
         assert!(!config.run_in_background);
         assert_eq!(
             config.default_shortcut.as_deref(),
             Some("Ctrl+Alt+Shift+F3")
         );
-        // Elevation is opt-in, so a config written before the setting existed
-        // must not start prompting for UAC on the next launch.
-        assert!(!config.run_as_admin);
+        assert!(config.run_as_admin);
         assert_eq!(config.theme.accent, "#5b8cff");
     }
 
@@ -299,10 +300,10 @@ mod tests {
     fn settings_survive_a_save_load_roundtrip() {
         let mut config = AppConfig {
             default_shortcut: Some("Ctrl + F12".to_string()),
-            close_after_launch_global: false,
+            close_after_launch_global: true,
             confirm_exit: false,
             run_in_background: true,
-            run_as_admin: true,
+            run_as_admin: false,
             ..AppConfig::default()
         };
         config.theme.accent = "#ff9f5b".to_string();
@@ -313,10 +314,10 @@ mod tests {
         let loaded: AppConfig = serde_json::from_str(&json).expect("parses");
 
         assert_eq!(loaded.default_shortcut.as_deref(), Some("Ctrl + F12"));
-        assert!(!loaded.close_after_launch_global);
+        assert!(loaded.close_after_launch_global);
         assert!(!loaded.confirm_exit);
         assert!(loaded.run_in_background);
-        assert!(loaded.run_as_admin);
+        assert!(!loaded.run_as_admin);
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());
         assert!(loaded.theme.is_compact());
@@ -344,7 +345,7 @@ mod tests {
         .expect("parses");
 
         assert_eq!(config.trainers[0].watched_exe, None);
-        assert!(config.trainers[0].auto_trigger_cheats);
+        assert!(!config.trainers[0].auto_trigger_cheats);
         assert_eq!(config.trainers[0].cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
     }
 

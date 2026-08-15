@@ -30,7 +30,7 @@ export component AppWindow inherits Window {
     in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
-    in-out property <bool> close-after-launch: true;
+    in-out property <bool> close-after-launch: false;
     // Whether B on Home (with nothing else open) shows a confirmation before
     // quitting, or quits immediately. Toggle lives in Settings.
     in-out property <bool> confirm-exit: true;
@@ -40,7 +40,7 @@ export component AppWindow inherits Window {
     // Persisted intent to start elevated; only takes effect on the next
     // startup, since a running process's integrity level is fixed. is-elevated
     // is what this process actually got, set once by Rust at wire-up.
-    in-out property <bool> run-as-admin: false;
+    in-out property <bool> run-as-admin: true;
     in property <bool> is-elevated: false;
     in-out property <bool> show-quit-confirm: false;
     // Left/right position shared by the delete-confirm, key-recorder, and
@@ -85,7 +85,7 @@ export component AppWindow inherits Window {
     in-out property <string> form-game-exe-display: "No game selected";
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
-    in-out property <bool> form-auto-trigger-cheats: true;
+    in-out property <bool> form-auto-trigger-cheats: false;
     in-out property <string> form-cheat-delay: "3";
     in-out property <[CheatEntry]> form-cheats: [];
     // Absolute path of the exe picked in the Add-trainer form, kept alongside

@@ -779,7 +779,7 @@ pub fn sync_trainer_configs(
                 size_bytes: info.size_bytes,
                 launch_script: LaunchScriptConfig::default(),
                 watched_exe: None,
-                auto_trigger_cheats: true,
+                auto_trigger_cheats: crate::config::DEFAULT_AUTO_TRIGGER_CHEATS,
                 cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
                 default_cheats: Vec::new(),
             });
@@ -1040,7 +1040,7 @@ mod tests {
             size_bytes: 0,
             launch_script: LaunchScriptConfig::default(),
             watched_exe: None,
-            auto_trigger_cheats: true,
+            auto_trigger_cheats: crate::config::DEFAULT_AUTO_TRIGGER_CHEATS,
             cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
             default_cheats: Vec::new(),
         }];
@@ -1052,6 +1052,7 @@ mod tests {
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].filename, "new-trainer.exe");
         assert_eq!(synced[0].name, "new-trainer");
+        assert!(!synced[0].auto_trigger_cheats);
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {

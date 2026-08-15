@@ -15,7 +15,8 @@ use slint::{
 };
 
 use crate::config::{
-    AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig, DEFAULT_CHEAT_DELAY_MS,
+    AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig, DEFAULT_AUTO_TRIGGER_CHEATS,
+    DEFAULT_CHEAT_DELAY_MS,
 };
 use crate::{
     clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
@@ -354,7 +355,7 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_watched_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
-    app.set_form_auto_trigger_cheats(true);
+    app.set_form_auto_trigger_cheats(DEFAULT_AUTO_TRIGGER_CHEATS);
     app.set_form_cheat_delay(format_cheat_delay(DEFAULT_CHEAT_DELAY_MS as i32).into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
     app.set_form_focused_index(-1);
