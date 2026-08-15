@@ -188,6 +188,10 @@ struct TriggerState {
     attempted: AtomicBool,
     /// Only one lifecycle watcher may own cleanup for the tracked trainer.
     watcher_started: AtomicBool,
+    /// The first launch skipped its default cheats because auto-trigger is
+    /// disabled. The tray's next explicit launch action must reuse that
+    /// process long enough to send the deferred batch instead of replacing it.
+    deferred_cheats_pending: AtomicBool,
 }
 
 /// Clears [`TriggerState::running`] however the sequence ends, including an
@@ -198,6 +202,15 @@ impl Drop for RunningGuard {
     fn drop(&mut self) {
         self.0.running.store(false, Ordering::SeqCst);
     }
+}
+
+fn should_launch_trainer(
+    force_launch: bool,
+    has_watched_exe: bool,
+    trainer_running: bool,
+    deferred_cheats_pending: bool,
+) -> bool {
+    !trainer_running || (force_launch && !has_watched_exe && !deferred_cheats_pending)
 }
 
 /// Windows UIPI silently discards injected input aimed at a higher-integrity
@@ -275,11 +288,14 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
         // A trainer with lifecycle cleanup must remain the single process held
         // in state, otherwise a second explicit launch would replace its
         // handle and leave the first process behind when the watched app exits.
-        let launched_now = if plan.watched_exe.is_some() {
-            !trainer_running
-        } else {
-            force_launch || !trainer_running
-        };
+        // The same applies while its first cheat batch is deferred: the next
+        // tray launch action belongs to the running process, not a duplicate.
+        let launched_now = should_launch_trainer(
+            force_launch,
+            plan.watched_exe.is_some(),
+            trainer_running,
+            state.deferred_cheats_pending.load(Ordering::SeqCst),
+        );
         let trigger_cheats = app_state::should_trigger_default_cheats(
             has_cheats,
             plan.auto_trigger_cheats,
@@ -288,7 +304,12 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
 
         if launched_now {
             match trainer::launch_trainer(&plan.folder, &plan.filename) {
-                Ok(process) => *trainer_process = Some(process),
+                Ok(process) => {
+                    *trainer_process = Some(process);
+                    state
+                        .deferred_cheats_pending
+                        .store(has_cheats && !plan.auto_trigger_cheats, Ordering::SeqCst);
+                }
                 Err(err) => {
                     crate::dialog::error(&format!("Failed to launch {}: {err}", plan.filename));
                     return;
@@ -351,6 +372,7 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                     failed.push(format!("{combo} ({err})"));
                 }
             }
+            state.deferred_cheats_pending.store(false, Ordering::SeqCst);
         }
 
         // A newly opened trainer stays foreground until its first cheat batch
@@ -713,6 +735,21 @@ mod tests {
         assert!(!should_start_watched_cleanup(true, true));
         assert!(should_start_watched_cleanup(false, true));
         assert!(!should_start_watched_cleanup(false, false));
+    }
+
+    #[test]
+    fn tray_launch_reuses_a_running_trainer_for_deferred_cheats() {
+        assert!(!should_launch_trainer(true, false, true, true));
+    }
+
+    #[test]
+    fn tray_launch_can_relaunch_after_deferred_cheats_are_sent() {
+        assert!(should_launch_trainer(true, false, true, false));
+    }
+
+    #[test]
+    fn watched_cleanup_still_prevents_replacing_its_running_trainer() {
+        assert!(!should_launch_trainer(true, true, true, false));
     }
 
     #[test]
