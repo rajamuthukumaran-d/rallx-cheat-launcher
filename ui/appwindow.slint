@@ -142,6 +142,9 @@ export component AppWindow inherits Window {
     in-out property <string> toast-message: "";
 
     callback launch-trainer(int);
+    // Internal normal-mode path used after the global shortcut matches a
+    // running watched executable. It differs only in post-injection minimizing.
+    callback launch-trainer-hotkey(int);
     callback refresh-trainers();
 
     public function launch-focused-trainer() {

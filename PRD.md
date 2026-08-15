@@ -50,7 +50,12 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Functionality,
 - List all the trainer in a selected folder
-- Clicking on the list or the play button or pressing A from gamepad will launch the trainer
+- Clicking on the list or the play button or pressing A from gamepad launches
+  or reuses the trainer, waits for a fresh trainer to become ready, and then
+  injects its saved default cheats without minimizing it. The normal-mode
+  global shortcut uses the same workflow but minimizes a freshly launched
+  trainer after injection when default cheats exist. Repeated shortcut presses
+  reuse the tracked process instead of launching duplicates.
 - Optionally the app also have a feature to create launch option that make the app run in background and on press of a button, it will open the selected app
     - Launch option will look like following,
         - ```rallx-cheater.exe --launch="rdr2-trainer.exe" --hotkey="insert" --defaultcheat="ctrl+num1,num3,ctrl+num5"```

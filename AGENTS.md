@@ -132,7 +132,11 @@ silently violate a requirement from another section.)
   then exits only in single trainer mode, not normal mode.
 - **Trainer launching:** click/play/A-button launches the trainer executable,
   resolved relative to the configured trainer folder (trainers are referenced
-  by filename only, never full path).
+  by filename only, never full path). Normal UI and global-hotkey launches wait
+  for readiness and inject saved default cheats; only a fresh hotkey-triggered
+  launch with cheats minimizes the trainer. Retained process state prevents
+  repeated hotkeys from launching duplicates, and close-after-launch runs only
+  after cheat injection finishes.
 - **Single trainer mode:** CLI args like
   `--launch="rdr2-trainer.exe" --hotkey="insert" --defaultcheat="ctrl+num1,num3,ctrl+num5"`.
   Only `--launch` is required — omitted values fall back to that trainer's
