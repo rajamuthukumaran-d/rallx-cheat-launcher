@@ -9,10 +9,10 @@ import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
 import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
-import { TrayIcon } from "tray.slint";
+import { TrayIcon, WindowedTrayIcon } from "tray.slint";
 
 // Theme is re-exported so app_state can seed it from config.json on startup.
-export { TrainerItem, CheatEntry, Theme, Palette, TrayIcon }
+export { TrainerItem, CheatEntry, Theme, Palette, TrayIcon, WindowedTrayIcon }
 
 export enum AppView { home, settings }
 
@@ -34,6 +34,9 @@ export component AppWindow inherits Window {
     // Whether B on Home (with nothing else open) shows a confirmation before
     // quitting, or quits immediately. Toggle lives in Settings.
     in-out property <bool> confirm-exit: true;
+    // Normal windowed mode may start hidden in the tray and return there when
+    // minimized. Launch-option background mode remains a separate startup path.
+    in-out property <bool> run-in-background: false;
     // Persisted intent to start elevated; only takes effect on the next
     // startup, since a running process's integrity level is fixed. is-elevated
     // is what this process actually got, set once by Rust at wire-up.
@@ -164,12 +167,13 @@ export component AppWindow inherits Window {
     }
 
     // Keep in sync with SettingsScreen's control layout: trainer folder,
-    // default shortcut, close-after-launch, confirm-before-close,
-    // run-as-admin, restart-as-admin, accent color, background, row style -
+    // default shortcut, run-in-background, close-after-launch,
+    // confirm-before-close, run-as-admin, restart-as-admin, accent color,
+    // background, row style -
     // each a single up/down stop; accent/background/row-style are then cycled
     // in place with left/right (see move-settings-value).
     function settings-item-count() -> int {
-        return 9;
+        return 10;
     }
 
     // Slint's imperative `for` has no index binding (only the declarative
@@ -213,11 +217,11 @@ export component AppWindow inherits Window {
     }
 
     function move-settings-value(delta: int) {
-        if root.settings-focused-index == 6 {
+        if root.settings-focused-index == 7 {
             root.cycle-accent(delta);
-        } else if root.settings-focused-index == 7 {
-            root.set-dark-theme(!Theme.dark);
         } else if root.settings-focused-index == 8 {
+            root.set-dark-theme(!Theme.dark);
+        } else if root.settings-focused-index == 9 {
             root.set-compact-rows(!Theme.compact);
         }
     }
@@ -228,11 +232,11 @@ export component AppWindow inherits Window {
         } else {
             root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
         }
-        // The restart-as-admin button (index 5) is disabled once the process is
+        // The restart-as-admin button (index 6) is disabled once the process is
         // already elevated, so step over it instead of parking focus on a stop
         // where A does nothing.
-        if root.settings-focused-index == 5 && root.is-elevated {
-            root.settings-focused-index = delta < 0 ? 4 : 6;
+        if root.settings-focused-index == 6 && root.is-elevated {
+            root.settings-focused-index = delta < 0 ? 5 : 7;
         }
     }
 
@@ -710,7 +714,7 @@ export component AppWindow inherits Window {
     }
 
     // Maps settings-focused-index to whichever control it represents. Rows
-    // 6-8 (accent/background/row-style) are cycled with left/right instead -
+    // 7-9 (accent/background/row-style) are cycled with left/right instead -
     // see move-settings-value - so A is a no-op there.
     function activate-settings-focused() {
         if root.settings-focused-index == 0 {
@@ -718,12 +722,14 @@ export component AppWindow inherits Window {
         } else if root.settings-focused-index == 1 {
             root.start-default-shortcut-recording();
         } else if root.settings-focused-index == 2 {
-            root.close-after-launch = !root.close-after-launch;
+            root.run-in-background = !root.run-in-background;
         } else if root.settings-focused-index == 3 {
-            root.confirm-exit = !root.confirm-exit;
+            root.close-after-launch = !root.close-after-launch;
         } else if root.settings-focused-index == 4 {
+            root.confirm-exit = !root.confirm-exit;
+        } else if root.settings-focused-index == 5 {
             root.run-as-admin = !root.run-as-admin;
-        } else if root.settings-focused-index == 5 && !root.is-elevated {
+        } else if root.settings-focused-index == 6 && !root.is-elevated {
             root.restart-as-admin();
         }
     }
@@ -949,6 +955,9 @@ export component AppWindow inherits Window {
     // controls or the gamepad path; app_state reads the current values back
     // off this window and writes them to config.json.
     callback settings-changed();
+    // Lets normal windowed startup show or hide its tray icon immediately when
+    // the setting changes. CLI launch-option mode does not subscribe to this.
+    callback run-in-background-changed(bool);
     // Ends this process and starts an elevated copy in its place; app_state
     // persists the pending settings first, since the new process reads them
     // back off config.json.
@@ -1037,6 +1046,7 @@ export component AppWindow inherits Window {
             height: 100%;
             folder-path: root.folder-path;
             default-shortcut-label: root.default-shortcut-label;
+            run-in-background <=> root.run-in-background;
             close-after-launch <=> root.close-after-launch;
             confirm-exit <=> root.confirm-exit;
             run-as-admin <=> root.run-as-admin;
@@ -1148,6 +1158,10 @@ export component AppWindow inherits Window {
     // watching the property covers every path in one place.
     changed close-after-launch => { root.settings-changed(); }
     changed confirm-exit => { root.settings-changed(); }
+    changed run-in-background => {
+        root.settings-changed();
+        root.run-in-background-changed(root.run-in-background);
+    }
     changed run-as-admin => { root.settings-changed(); }
     changed default-shortcut-label => { root.settings-changed(); }
 }

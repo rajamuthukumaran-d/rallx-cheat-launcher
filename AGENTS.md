@@ -83,6 +83,9 @@ silently violate a requirement from another section.)
   RB=copy launch script, Start=settings); "close after launching" checkbox.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
   (accent/background/style), global "close app after launching trainer",
+  normal-mode "run in background" (start hidden in the tray and minimize to
+  tray while retaining the global running-game hotkey; separate from the
+  `--launch` background branch),
   "run as administrator" (applied at next startup) plus a restart-elevated
   button that is disabled once the process is already elevated.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;

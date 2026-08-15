@@ -6,6 +6,9 @@
 slint::include_modules!();
 
 use slint::ComponentHandle;
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Duration;
 
 mod app_state;
 mod background;
@@ -162,6 +165,23 @@ fn enable_key_capture(app: &AppWindow) {
     });
 }
 
+/// Shows the normal app window and starts the input integrations that require
+/// a native HWND. A tray-started process has no HWND until its first Open
+/// action, so these cannot be installed unconditionally during startup.
+fn show_windowed_app(
+    app: &AppWindow,
+    window_features_started: &Cell<bool>,
+) -> Result<(), slint::PlatformError> {
+    app.window().set_minimized(false);
+    app.show()?;
+    if !window_features_started.replace(true) {
+        enable_drag_drop(app);
+        enable_key_capture(app);
+        gamepad::spawn_listener(app.as_weak());
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -202,22 +222,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    let start_in_background = config.run_in_background;
     let app = create_window()?;
 
     app_state::wire(&app, config, app_state::AppMode::Windowed);
-    gamepad::spawn_listener(app.as_weak());
+    let tray = WindowedTrayIcon::new()?;
+    let window_features_started = Rc::new(Cell::new(false));
 
-    // Shown explicitly rather than through app.run() because the window has no
-    // HWND to hang the file-drop subclass off until it exists.
-    let outcome = match app.show() {
-        Ok(()) => {
-            enable_drag_drop(&app);
-            enable_key_capture(&app);
-            slint::run_event_loop()
+    {
+        let app_weak = app.as_weak();
+        let window_features_started = window_features_started.clone();
+        tray.on_show_window(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if let Err(err) = show_windowed_app(&app, &window_features_started) {
+                dialog::error(&format!("Could not show Rallx: {err}"));
+            }
+        });
+    }
+    tray.on_quit_app(|| {
+        let _ = slint::quit_event_loop();
+    });
+
+    {
+        let tray_weak = tray.as_weak();
+        app.on_run_in_background_changed(move |enabled| {
+            let Some(tray) = tray_weak.upgrade() else {
+                return;
+            };
+            let result = if enabled { tray.show() } else { tray.hide() };
+            if let Err(err) = result {
+                dialog::error(&format!("Could not update the system tray icon: {err}"));
+            }
+        });
+    }
+
+    // run_event_loop_until_quit is deliberate: once minimized, no app window
+    // remains visible, but the normal-mode tray and global game-matching
+    // hotkey must keep running until Exit is chosen.
+    app.window().on_close_requested(|| {
+        let _ = slint::quit_event_loop();
+        slint::CloseRequestResponse::HideWindow
+    });
+
+    let minimize_timer = slint::Timer::default();
+    {
+        let app_weak = app.as_weak();
+        minimize_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(100),
+            move || {
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                if app.get_run_in_background() && app.window().is_minimized() {
+                    // Clear the native minimized state before hiding so Open
+                    // from the tray restores a normal window rather than a
+                    // hidden-but-still-minimized one.
+                    app.window().set_minimized(false);
+                    let _ = app.hide();
+                }
+            },
+        );
+    }
+
+    let outcome = if start_in_background {
+        tray.show()?;
+        slint::run_event_loop_until_quit()
+    } else {
+        match show_windowed_app(&app, &window_features_started) {
+            Ok(()) => slint::run_event_loop_until_quit(),
+            Err(err) => Err(err),
         }
-        Err(err) => Err(err),
     };
     let _ = app.hide();
+    drop(minimize_timer);
+    drop(tray);
     drop(app);
 
     elevate::finish_requested_restart();

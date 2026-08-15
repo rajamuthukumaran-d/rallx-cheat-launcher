@@ -461,6 +461,7 @@ fn palette_accent(app: &AppWindow, (r, g, b): (u8, u8, u8)) -> Color {
 fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_close_after_launch(config.close_after_launch_global);
     app.set_confirm_exit(config.confirm_exit);
+    app.set_run_in_background(config.run_in_background);
     app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
@@ -483,6 +484,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     let mut config = state.config.borrow_mut();
     config.close_after_launch_global = app.get_close_after_launch();
     config.confirm_exit = app.get_confirm_exit();
+    config.run_in_background = app.get_run_in_background();
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,

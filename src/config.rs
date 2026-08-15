@@ -160,6 +160,11 @@ pub struct AppConfig {
     pub close_after_launch_global: bool,
     #[serde(default = "default_true")]
     pub confirm_exit: bool,
+    /// Normal windowed mode starts hidden in the system tray and keeps its
+    /// global running-game hotkey active. This is separate from CLI
+    /// launch-option background mode, which targets one configured trainer.
+    #[serde(default)]
+    pub run_in_background: bool,
     /// Whether startup should hand off to an elevated copy of the app. Off by
     /// default: elevation is only needed to reach trainers that run elevated
     /// themselves, and it costs a UAC prompt every launch.
@@ -177,6 +182,7 @@ impl Default for AppConfig {
             theme: ThemeConfig::default(),
             close_after_launch_global: true,
             confirm_exit: true,
+            run_in_background: false,
             run_as_admin: false,
             trainers: Vec::new(),
         }
@@ -263,6 +269,7 @@ mod tests {
         assert_eq!(config.trainer_folder, Some(PathBuf::from("C:\\trainers")));
         assert!(config.close_after_launch_global);
         assert!(config.confirm_exit);
+        assert!(!config.run_in_background);
         assert_eq!(
             config.default_shortcut.as_deref(),
             Some("Ctrl+Alt+Shift+F3")
@@ -279,6 +286,7 @@ mod tests {
             default_shortcut: Some("Ctrl + F12".to_string()),
             close_after_launch_global: false,
             confirm_exit: false,
+            run_in_background: true,
             run_as_admin: true,
             ..AppConfig::default()
         };
@@ -292,6 +300,7 @@ mod tests {
         assert_eq!(loaded.default_shortcut.as_deref(), Some("Ctrl + F12"));
         assert!(!loaded.close_after_launch_global);
         assert!(!loaded.confirm_exit);
+        assert!(loaded.run_in_background);
         assert!(loaded.run_as_admin);
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());

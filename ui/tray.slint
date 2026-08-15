@@ -32,3 +32,30 @@ export component TrayIcon inherits SystemTrayIcon {
         }
     }
 }
+
+// Normal windowed mode has no trainer pinned to it: its global shortcut finds
+// the running game dynamically. Keep its tray menu separate from launch-option
+// mode so the two background behaviors cannot accidentally share actions.
+export component WindowedTrayIcon inherits SystemTrayIcon {
+    icon: @image-url("../assets/images/logo/logo-icon.png");
+    tooltip: "Rallx Cheat Launcher";
+
+    callback show-window();
+    callback quit-app();
+
+    clicked => { root.show-window(); }
+
+    Menu {
+        MenuItem {
+            title: "Open Rallx";
+            activated => { root.show-window(); }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            title: "Exit";
+            activated => { root.quit-app(); }
+        }
+    }
+}
