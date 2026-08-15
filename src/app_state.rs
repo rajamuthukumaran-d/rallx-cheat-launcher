@@ -14,7 +14,9 @@ use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
 };
 
-use crate::config::{AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig};
+use crate::config::{
+    AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig, DEFAULT_CHEAT_DELAY_MS,
+};
 use crate::{
     clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
     CheatEntry, Palette, Theme, TrainerItem,
@@ -28,7 +30,6 @@ const NO_WATCHED_EXE_PLACEHOLDER: &str = "No app selected";
 const NOT_SET: &str = "Not set";
 const GLOBAL_HOTKEY_POLL: Duration = Duration::from_millis(50);
 const TRAINER_READY_TIMEOUT: Duration = Duration::from_secs(10);
-const TRAINER_READY_GRACE: Duration = Duration::from_secs(3);
 const HOTKEY_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 const CHEAT_INTERVAL: Duration = Duration::from_millis(300);
 
@@ -115,6 +116,8 @@ struct NewTrainer<'a> {
     game_args: &'a str,
     watched_exe: &'a str,
     shortcut: &'a str,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: i32,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
 }
@@ -140,6 +143,8 @@ fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
         game_args: fields.game_args.into(),
         watched_exe: fields.watched_exe.into(),
         shortcut: fields.shortcut.into(),
+        auto_trigger_cheats: fields.auto_trigger_cheats,
+        cheat_delay_ms: fields.cheat_delay_ms,
         color,
         letter: letter.into(),
         has_icon: fields.icon.is_some(),
@@ -188,6 +193,8 @@ fn config_to_trainer_item(
             game_args: cfg.launch_script.game_args.as_deref().unwrap_or_default(),
             watched_exe: cfg.watched_exe.as_deref().unwrap_or_default(),
             shortcut: &shortcut,
+            auto_trigger_cheats: cfg.auto_trigger_cheats,
+            cheat_delay_ms: cfg.cheat_delay_ms.min(i32::MAX as u64) as i32,
             cheats,
             icon,
         },
@@ -266,7 +273,8 @@ fn find_trainer(state: &AppState, id: i32) -> Option<TrainerItem> {
 }
 
 /// Applies a virtual-keyboard edit (insert/backspace) to whichever field
-/// `keyboard_target` names ("search" | "name" | "cheat" | "game-args"), then mirrors the
+/// `keyboard_target` names ("search" | "name" | "cheat" | "game-args" |
+/// "delay"), then mirrors the
 /// result back into `keyboard_preview` so the popup's own display stays in
 /// sync. The actual string mutation happens here in Rust rather than in
 /// Slint, since Slint's imperative string API has no substring/pop support.
@@ -282,6 +290,7 @@ fn apply_keyboard_edit(app: &AppWindow, state: &AppState, edit: impl FnOnce(&mut
         }
         "name" => app.set_form_name(text.into()),
         "game-args" => app.set_form_game_args(text.into()),
+        "delay" => app.set_form_cheat_delay(text.into()),
         "cheat" => {
             let id = app.get_keyboard_cheat_id();
             let cheats: Vec<CheatEntry> = cheats_to_vec(&app.get_form_cheats())
@@ -304,6 +313,32 @@ fn show_toast(app: &AppWindow, message: impl Into<SharedString>) {
     app.set_show_toast(true);
 }
 
+fn format_cheat_delay(delay_ms: i32) -> String {
+    let seconds = f64::from(delay_ms.max(0)) / 1_000.0;
+    if delay_ms % 1_000 == 0 {
+        format!("{seconds:.0}")
+    } else {
+        format!("{seconds:.3}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
+
+fn parse_cheat_delay(value: &str) -> Result<u64, String> {
+    let seconds = value.trim().parse::<f64>().map_err(|_| {
+        "Enter the auto-trigger delay in seconds (for example, 3 or 1.5)".to_string()
+    })?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return Err("The auto-trigger delay must be zero or greater".to_string());
+    }
+    let milliseconds = seconds * 1_000.0;
+    if milliseconds > u64::MAX as f64 {
+        return Err("The auto-trigger delay is too large".to_string());
+    }
+    Ok(milliseconds.round() as u64)
+}
+
 fn open_add_form(app: &AppWindow) {
     app.set_editing_id(-1);
     app.set_form_title("Add trainer".into());
@@ -319,6 +354,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_watched_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
+    app.set_form_auto_trigger_cheats(true);
+    app.set_form_cheat_delay(format_cheat_delay(DEFAULT_CHEAT_DELAY_MS as i32).into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
@@ -398,6 +435,8 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     });
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
+    app.set_form_auto_trigger_cheats(trainer.auto_trigger_cheats);
+    app.set_form_cheat_delay(format_cheat_delay(trainer.cheat_delay_ms).into());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
@@ -414,6 +453,8 @@ struct TrainerFormValues<'a> {
     game_args: &'a str,
     watched_exe: &'a str,
     shortcut: &'a str,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: u64,
     cheats: &'a [CheatEntry],
 }
 
@@ -456,6 +497,8 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
         entry.launch_script.game_args = game_args;
         entry.watched_exe = watched_exe;
         entry.launch_script.launch_shortcut = launch_shortcut;
+        entry.auto_trigger_cheats = form.auto_trigger_cheats;
+        entry.cheat_delay_ms = form.cheat_delay_ms;
         entry.default_cheats = default_cheats;
     } else {
         config.trainers.push(TrainerConfig {
@@ -470,6 +513,8 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
                 close_after_launch: false,
             },
             watched_exe,
+            auto_trigger_cheats: form.auto_trigger_cheats,
+            cheat_delay_ms: form.cheat_delay_ms,
             default_cheats,
         });
     }
@@ -661,6 +706,8 @@ struct NormalLaunchRequest {
     watched_exe: Option<PathBuf>,
     cheats: Vec<keys::KeyCombo>,
     invalid_cheats: Vec<String>,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: u64,
     close_after_launch: bool,
     launch_hotkey: Option<keys::KeyCombo>,
     origin: NormalLaunchOrigin,
@@ -669,9 +716,22 @@ struct NormalLaunchRequest {
 fn should_minimize_normal_trainer(
     origin: NormalLaunchOrigin,
     launched_now: bool,
-    has_cheats: bool,
+    triggered_cheats: bool,
+    auto_trigger_cheats: bool,
+    close_without_auto_trigger: bool,
 ) -> bool {
-    origin == NormalLaunchOrigin::GlobalHotkey && launched_now && has_cheats
+    (origin == NormalLaunchOrigin::GlobalHotkey
+        && triggered_cheats
+        && (launched_now || !auto_trigger_cheats))
+        || (launched_now && close_without_auto_trigger)
+}
+
+pub(crate) fn should_trigger_default_cheats(
+    has_default_cheats: bool,
+    auto_trigger_cheats: bool,
+    launched_now: bool,
+) -> bool {
+    has_default_cheats && (auto_trigger_cheats || !launched_now)
 }
 
 fn should_start_normal_watcher(close_after_launch: bool, has_watched_exe: bool) -> bool {
@@ -844,6 +904,8 @@ fn request_normal_trainer_launch(
         watched_exe,
         cheats,
         invalid_cheats,
+        auto_trigger_cheats: item.auto_trigger_cheats,
+        cheat_delay_ms: item.cheat_delay_ms.max(0) as u64,
         close_after_launch: app.get_close_after_launch(),
         launch_hotkey,
         origin,
@@ -859,8 +921,8 @@ fn request_normal_trainer_launch(
 
     std::thread::spawn(move || {
         let _guard = guard;
-        let has_cheats = !request.cheats.is_empty();
-        if has_cheats {
+        let has_default_cheats = !request.cheats.is_empty() || !request.invalid_cheats.is_empty();
+        if has_default_cheats {
             if let Some(hotkey) = request.launch_hotkey.as_ref() {
                 if !keys::wait_until_released(hotkey, HOTKEY_RELEASE_TIMEOUT) {
                     post_toast(
@@ -916,11 +978,6 @@ fn request_normal_trainer_launch(
                         return;
                     }
                 };
-                warn_if_normal_cheats_cannot_reach(
-                    &request.filename,
-                    &request.cheats,
-                    launched.mode(),
-                );
                 let process = Arc::new(Mutex::new(launched));
                 launch_state
                     .trainers
@@ -948,7 +1005,19 @@ fn request_normal_trainer_launch(
             );
         }
 
-        if launched_now && has_cheats {
+        let trigger_cheats = should_trigger_default_cheats(
+            has_default_cheats,
+            request.auto_trigger_cheats,
+            launched_now,
+        );
+
+        if trigger_cheats {
+            let mode = process.lock().unwrap_or_else(|err| err.into_inner()).mode();
+            warn_if_normal_cheats_cannot_reach(&request.filename, &request.cheats, mode);
+        }
+
+        let close_without_auto_trigger = request.close_after_launch && !request.auto_trigger_cheats;
+        if launched_now && (trigger_cheats || close_without_auto_trigger) {
             let wait_result = process
                 .lock()
                 .unwrap_or_else(|err| err.into_inner())
@@ -959,10 +1028,12 @@ fn request_normal_trainer_launch(
                     request.filename
                 );
             }
-            std::thread::sleep(TRAINER_READY_GRACE);
+        }
+        if launched_now && trigger_cheats {
+            std::thread::sleep(Duration::from_millis(request.cheat_delay_ms));
         }
 
-        if has_cheats {
+        if trigger_cheats {
             let still_running = process
                 .lock()
                 .unwrap_or_else(|err| err.into_inner())
@@ -989,17 +1060,26 @@ fn request_normal_trainer_launch(
             }
         }
 
-        let mut failed = request.invalid_cheats;
-        for (index, combo) in request.cheats.iter().enumerate() {
-            if index > 0 {
-                std::thread::sleep(CHEAT_INTERVAL);
-            }
-            if let Err(err) = keys::press(combo) {
-                failed.push(format!("{combo} ({err})"));
+        let mut failed = Vec::new();
+        if trigger_cheats {
+            failed = request.invalid_cheats;
+            for (index, combo) in request.cheats.iter().enumerate() {
+                if index > 0 {
+                    std::thread::sleep(CHEAT_INTERVAL);
+                }
+                if let Err(err) = keys::press(combo) {
+                    failed.push(format!("{combo} ({err})"));
+                }
             }
         }
 
-        if should_minimize_normal_trainer(request.origin, launched_now, has_cheats) {
+        if should_minimize_normal_trainer(
+            request.origin,
+            launched_now,
+            trigger_cheats,
+            request.auto_trigger_cheats,
+            close_without_auto_trigger,
+        ) {
             process
                 .lock()
                 .unwrap_or_else(|err| err.into_inner())
@@ -1021,8 +1101,15 @@ fn request_normal_trainer_launch(
             post_toast(
                 app_weak,
                 if launched_now {
-                    format!("Launched {}", request.name)
-                } else if has_cheats {
+                    if has_default_cheats && !request.auto_trigger_cheats {
+                        format!(
+                            "Launched {}; trigger it again to activate default cheats",
+                            request.name
+                        )
+                    } else {
+                        format!("Launched {}", request.name)
+                    }
+                } else if trigger_cheats {
                     format!("Activated default cheats for {}", request.name)
                 } else {
                     format!("{} is already running", request.name)
@@ -1327,6 +1414,15 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
             let game_exe = app.get_form_game_exe_path().to_string();
             let game_args = app.get_form_game_args().to_string();
             let watched_exe = app.get_form_watched_exe_path().to_string();
+            let auto_trigger_cheats = app.get_form_auto_trigger_cheats();
+            let cheat_delay_ms = match parse_cheat_delay(app.get_form_cheat_delay().as_str()) {
+                Ok(delay) => delay,
+                Err(message) if auto_trigger_cheats => {
+                    show_toast(&app, message);
+                    return;
+                }
+                Err(_) => DEFAULT_CHEAT_DELAY_MS,
+            };
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
@@ -1367,6 +1463,8 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
                     game_args: &game_args,
                     watched_exe: &watched_exe,
                     shortcut: &shortcut,
+                    auto_trigger_cheats,
+                    cheat_delay_ms,
                     cheats: &cheats,
                 },
             );
@@ -1740,6 +1838,8 @@ mod tests {
             game_args: "".into(),
             watched_exe: "".into(),
             shortcut: shortcut.into(),
+            auto_trigger_cheats: true,
+            cheat_delay_ms: DEFAULT_CHEAT_DELAY_MS as i32,
             color: Color::from_rgb_u8(0, 0, 0),
             letter: "R".into(),
             has_icon: false,
@@ -1833,31 +1933,70 @@ mod tests {
     }
 
     #[test]
-    fn interface_launches_never_minimize_the_trainer() {
+    fn interface_launch_minimizes_only_for_close_without_auto_trigger() {
         assert!(!should_minimize_normal_trainer(
             NormalLaunchOrigin::Interface,
             true,
-            true
+            true,
+            true,
+            false,
+        ));
+        assert!(should_minimize_normal_trainer(
+            NormalLaunchOrigin::Interface,
+            true,
+            false,
+            false,
+            true,
         ));
     }
 
     #[test]
-    fn global_hotkey_minimizes_only_a_fresh_trainer_with_cheats() {
+    fn global_hotkey_minimizes_fresh_auto_or_deferred_cheats() {
         assert!(should_minimize_normal_trainer(
             NormalLaunchOrigin::GlobalHotkey,
             true,
-            true
+            true,
+            true,
+            false,
         ));
         assert!(!should_minimize_normal_trainer(
             NormalLaunchOrigin::GlobalHotkey,
             false,
-            true
+            true,
+            true,
+            false,
         ));
         assert!(!should_minimize_normal_trainer(
             NormalLaunchOrigin::GlobalHotkey,
             true,
-            false
+            false,
+            true,
+            false,
         ));
+        assert!(should_minimize_normal_trainer(
+            NormalLaunchOrigin::GlobalHotkey,
+            false,
+            true,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn disabled_auto_trigger_waits_for_the_next_action() {
+        assert!(!should_trigger_default_cheats(true, false, true));
+        assert!(should_trigger_default_cheats(true, false, false));
+        assert!(should_trigger_default_cheats(true, true, true));
+        assert!(!should_trigger_default_cheats(false, true, true));
+    }
+
+    #[test]
+    fn cheat_delay_converts_between_seconds_and_milliseconds() {
+        assert_eq!(parse_cheat_delay("3"), Ok(3_000));
+        assert_eq!(parse_cheat_delay("1.25"), Ok(1_250));
+        assert_eq!(format_cheat_delay(1_250), "1.25");
+        assert!(parse_cheat_delay("-1").is_err());
+        assert!(parse_cheat_delay("later").is_err());
     }
 
     #[test]

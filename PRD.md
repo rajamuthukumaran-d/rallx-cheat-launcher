@@ -47,6 +47,10 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - Assign shortcut to launch trainer
 - Add list of cheats need to enable (Will be a list containing key or key combination eg, Numpad 1, ctrl + numberpad 3, etc)
 - When adding cheats to enable allow user to enter key or key combination by clicking on a record button
+- An "Auto trigger cheat on launch" toggle. It defaults on for new and existing
+  trainers and reveals a configurable delay in seconds (3 seconds by default).
+  When off, launching skips the default cheats and the next hotkey/launch action
+  against the running trainer triggers them.
 
 ## Functionality,
 - List all the trainer in a selected folder
@@ -69,6 +73,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - Dragging and dropping a exe will show add trainer window and confirming will move that file inside the trainer folder
 - When adding a trainer, user has option to set launch option and default trainer shotcuts. Selecting these option only save them. When copy a launch script will be generated based on these selection
 - Globally in settings and when launching individual trainer there is an option to close the app after launching the trainer. If enabled it will close the app once the trainer is launched and default cheats are entered
+- If close-after-launch is enabled while auto-trigger is disabled, Rallx waits
+  for the trainer to open, minimizes it, skips the default cheats, and exits.
 - When a trainer has a watched executable and close-after-launch is also
   enabled, close-after-launch takes precedence: Rallx exits after triggering
   any default cheats and leaves the trainer running without watched cleanup.

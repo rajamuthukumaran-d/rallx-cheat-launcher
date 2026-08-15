@@ -85,6 +85,8 @@ export component AppWindow inherits Window {
     in-out property <string> form-game-exe-display: "No game selected";
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
+    in-out property <bool> form-auto-trigger-cheats: true;
+    in-out property <string> form-cheat-delay: "3";
     in-out property <[CheatEntry]> form-cheats: [];
     // Absolute path of the exe picked in the Add-trainer form, kept alongside
     // form-exe-display (filename only) because the file still has to be moved
@@ -109,8 +111,9 @@ export component AppWindow inherits Window {
     in-out property <bool> form-game-expanded: false;
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
     // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
-    // launch options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Add cheat, one stop per
-    // cheat row, then Cancel/Save last. Keep in sync with
+    // launch options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Auto
+    // trigger, 9 Delay, 10 Add cheat, one stop per cheat row, then Cancel/Save
+    // last. Delay is skipped while auto trigger is disabled. Keep in sync with
     // form-item-count()/activate-form-focused() below and
     // AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
@@ -244,10 +247,10 @@ export component AppWindow inherits Window {
     }
 
     // Name, Trainer executable, Game section header, Game executable, Game
-    // launch options, Shortcut, Generate .bat, Watched app, Add cheat, one stop per cheat
-    // row, Cancel/Save.
+    // launch options, Shortcut, Generate .bat, Watched app, Auto trigger,
+    // Delay, Add cheat, one stop per cheat row, Cancel/Save.
     function form-item-count() -> int {
-        return 10 + root.form-cheats.length;
+        return 12 + root.form-cheats.length;
     }
 
     // The trainer-executable row (index 1) is only rendered when adding, so
@@ -286,6 +289,9 @@ export component AppWindow inherits Window {
         if root.form-focused-index == 6 && !root.form-can-generate-bat() {
             root.form-focused-index = delta < 0 ? 5 : 7;
         }
+        if root.form-focused-index == 9 && !root.form-auto-trigger-cheats {
+            root.form-focused-index = delta < 0 ? 8 : 10;
+        }
         root.form-sub-index = 0;
     }
 
@@ -297,9 +303,9 @@ export component AppWindow inherits Window {
             return 2;
         } else if root.form-focused-index == 7 && !root.form-watched-exe-path.is-empty {
             return 2;
-        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
+        } else if root.form-focused-index >= 11 && root.form-focused-index < 11 + root.form-cheats.length {
             return 3;
-        } else if root.form-focused-index == 9 + root.form-cheats.length {
+        } else if root.form-focused-index == 11 + root.form-cheats.length {
             return 2;
         }
         return 1;
@@ -588,7 +594,7 @@ export component AppWindow inherits Window {
         root.keyboard-row = 0;
         root.keyboard-col = 0;
         root.keyboard-shift = false;
-        root.keyboard-numpad = false;
+        root.keyboard-numpad = target == "delay";
         root.show-keyboard = true;
     }
 
@@ -782,18 +788,24 @@ export component AppWindow inherits Window {
                 root.clear-watched-exe();
             }
         } else if root.form-focused-index == 8 {
+            root.form-auto-trigger-cheats = !root.form-auto-trigger-cheats;
+        } else if root.form-focused-index == 9 {
+            if via-gamepad && root.form-auto-trigger-cheats {
+                root.open-keyboard("delay", -1, root.form-cheat-delay);
+            }
+        } else if root.form-focused-index == 10 {
             root.add-cheat-row();
-        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
+        } else if root.form-focused-index >= 11 && root.form-focused-index < 11 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 if via-gamepad {
-                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 9].id, root.form-cheats[root.form-focused-index - 9].label);
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 11].id, root.form-cheats[root.form-focused-index - 11].label);
                 }
             } else if root.form-sub-index == 1 {
-                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 9].id);
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 11].id);
             } else if root.form-sub-index == 2 {
-                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 9].id);
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 11].id);
             }
-        } else if root.form-focused-index == 9 + root.form-cheats.length {
+        } else if root.form-focused-index == 11 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 root.cancel-form();
             } else {
@@ -1092,6 +1104,8 @@ export component AppWindow inherits Window {
             form-game-args <=> root.form-game-args;
             form-watched-exe-display: root.form-watched-exe-display;
             form-shortcut-display: root.form-shortcut-display;
+            auto-trigger-cheats <=> root.form-auto-trigger-cheats;
+            cheat-delay <=> root.form-cheat-delay;
             cheats: root.form-cheats;
             show-exe-field: root.form-exe-field-visible();
             game-expanded: root.form-game-expanded;

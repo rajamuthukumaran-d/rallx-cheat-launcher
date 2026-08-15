@@ -35,6 +35,12 @@ fn default_true() -> bool {
     true
 }
 
+pub const DEFAULT_CHEAT_DELAY_MS: u64 = 3_000;
+
+fn default_cheat_delay_ms() -> u64 {
+    DEFAULT_CHEAT_DELAY_MS
+}
+
 fn default_launch_shortcut() -> Option<String> {
     Some("Ctrl+Alt+Shift+F3".to_string())
 }
@@ -145,6 +151,15 @@ pub struct TrainerConfig {
     /// Rallx itself exits afterward only in launch-option background mode.
     #[serde(default)]
     pub watched_exe: Option<String>,
+    /// Whether the first action that launches this trainer also sends its
+    /// default cheats. When disabled, a later hotkey/action against the
+    /// already-running trainer sends them instead.
+    #[serde(default = "default_true")]
+    pub auto_trigger_cheats: bool,
+    /// Extra time after the trainer reports that its UI is ready before the
+    /// launch-time default cheats are sent.
+    #[serde(default = "default_cheat_delay_ms")]
+    pub cheat_delay_ms: u64,
     pub default_cheats: Vec<CheatConfig>,
 }
 
@@ -329,6 +344,8 @@ mod tests {
         .expect("parses");
 
         assert_eq!(config.trainers[0].watched_exe, None);
+        assert!(config.trainers[0].auto_trigger_cheats);
+        assert_eq!(config.trainers[0].cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
     }
 
     #[test]
@@ -345,6 +362,8 @@ mod tests {
                 close_after_launch: true,
             },
             watched_exe: None,
+            auto_trigger_cheats: true,
+            cheat_delay_ms: DEFAULT_CHEAT_DELAY_MS,
             default_cheats: Vec::new(),
         };
 

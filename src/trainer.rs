@@ -779,6 +779,8 @@ pub fn sync_trainer_configs(
                 size_bytes: info.size_bytes,
                 launch_script: LaunchScriptConfig::default(),
                 watched_exe: None,
+                auto_trigger_cheats: true,
+                cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
                 default_cheats: Vec::new(),
             });
         }
@@ -994,6 +996,8 @@ mod tests {
                 close_after_launch: true,
             },
             watched_exe: Some("C:\\Games\\Game.exe".to_string()),
+            auto_trigger_cheats: false,
+            cheat_delay_ms: 1_500,
             default_cheats: vec![crate::config::CheatConfig {
                 label: "Infinite Health".to_string(),
                 key: "Numpad1".to_string(),
@@ -1006,6 +1010,8 @@ mod tests {
 
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].name, "My Trainer");
+        assert!(!synced[0].auto_trigger_cheats);
+        assert_eq!(synced[0].cheat_delay_ms, 1_500);
         // Version is re-read from the exe on every sync rather than kept
         // from config - the fixture file has no version resource, so it
         // comes back empty rather than the stale "1.2.3".
@@ -1034,6 +1040,8 @@ mod tests {
             size_bytes: 0,
             launch_script: LaunchScriptConfig::default(),
             watched_exe: None,
+            auto_trigger_cheats: true,
+            cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
             default_cheats: Vec::new(),
         }];
 

@@ -1,7 +1,7 @@
 //! Background/tray mode: the branch `main` takes when launch options are
 //! present. No window is shown at startup - the app sits in the system tray,
-//! waits for its hotkey, then launches the trainer and injects the configured
-//! default cheats.
+//! waits for its hotkey, then launches the trainer and conditionally injects
+//! the configured default cheats.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use slint::{ComponentHandle, Timer, TimerMode};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, DEFAULT_CHEAT_DELAY_MS};
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
 use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
@@ -19,11 +19,6 @@ use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, T
 /// initialization. Programs without a standard GUI queue time out and then
 /// continue after the grace period below.
 const TRAINER_READY_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// A trainer can finish its own GUI initialization before it has attached to
-/// the game, so newly launched trainers get this additional head start before
-/// their default cheats are injected.
-const TRAINER_READY_GRACE: Duration = Duration::from_secs(3);
 
 /// A global-hotkey event arrives on key-down. Injection waits for the physical
 /// shortcut to be released so its keys cannot contaminate the first cheat.
@@ -45,6 +40,8 @@ pub struct BackgroundPlan {
     /// would ever trigger it.
     pub hotkey: Option<KeyCombo>,
     pub cheats: Vec<KeyCombo>,
+    pub auto_trigger_cheats: bool,
+    pub cheat_delay_ms: u64,
     pub close_after_launch: bool,
     pub watched_exe: Option<PathBuf>,
 }
@@ -137,6 +134,13 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
             .map_err(|err| format!("saved default cheat: {err}"))?
             .unwrap_or_default(),
     };
+    let (auto_trigger_cheats, cheat_delay_ms) = if options.override_saved {
+        (true, DEFAULT_CHEAT_DELAY_MS)
+    } else {
+        saved
+            .map(|entry| (entry.auto_trigger_cheats, entry.cheat_delay_ms))
+            .unwrap_or((true, DEFAULT_CHEAT_DELAY_MS))
+    };
 
     Ok(BackgroundPlan {
         folder,
@@ -150,6 +154,8 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
         filename,
         hotkey,
         cheats,
+        auto_trigger_cheats,
+        cheat_delay_ms,
         close_after_launch: options.close_after_launch,
         watched_exe: saved
             .and_then(|entry| entry.watched_exe.as_deref())
@@ -222,9 +228,10 @@ fn warn_if_cheats_cannot_reach(plan: &BackgroundPlan, mode: trainer::LaunchMode)
     ));
 }
 
-/// Launches the trainer if needed and injects the default cheats. Runs off the
-/// UI thread: the elevated launch path blocks on the UAC prompt and the
-/// injection sequence sleeps between combos.
+/// Launches the trainer if needed and injects the default cheats when this is
+/// either an auto-triggering launch or a later action against the running
+/// trainer. Runs off the UI thread: the elevated launch path blocks on the UAC
+/// prompt and the injection sequence sleeps between combos.
 ///
 /// `force_launch` distinguishes the tray menu's explicit "Launch" item, which
 /// must start the trainer every time it is clicked, from a hotkey press, which
@@ -273,21 +280,27 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
         } else {
             force_launch || !trainer_running
         };
+        let trigger_cheats = app_state::should_trigger_default_cheats(
+            has_cheats,
+            plan.auto_trigger_cheats,
+            launched_now,
+        );
 
         if launched_now {
             match trainer::launch_trainer(&plan.folder, &plan.filename) {
-                Ok(process) => {
-                    warn_if_cheats_cannot_reach(&plan, process.mode());
-                    *trainer_process = Some(process);
-                }
+                Ok(process) => *trainer_process = Some(process),
                 Err(err) => {
                     crate::dialog::error(&format!("Failed to launch {}: {err}", plan.filename));
                     return;
                 }
             }
 
-            if has_cheats {
+            let close_without_auto_trigger = plan.close_after_launch && !plan.auto_trigger_cheats;
+            if trigger_cheats || close_without_auto_trigger {
                 if let Some(process) = trainer_process.as_ref() {
+                    if trigger_cheats {
+                        warn_if_cheats_cannot_reach(&plan, process.mode());
+                    }
                     if let Err(err) = process.wait_for_input_idle(TRAINER_READY_TIMEOUT) {
                         eprintln!(
                             "Could not wait for {} to become ready: {err}",
@@ -295,7 +308,9 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                         );
                     }
                 }
-                std::thread::sleep(TRAINER_READY_GRACE);
+            }
+            if trigger_cheats {
+                std::thread::sleep(Duration::from_millis(plan.cheat_delay_ms));
 
                 let still_running = match trainer_process.as_mut() {
                     Some(process) => match process.is_running() {
@@ -319,23 +334,32 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
                 }
             }
         }
+        if trigger_cheats && !launched_now {
+            if let Some(process) = trainer_process.as_ref() {
+                warn_if_cheats_cannot_reach(&plan, process.mode());
+            }
+        }
         drop(trainer_process);
 
         let mut failed = Vec::new();
-        for (index, combo) in plan.cheats.iter().enumerate() {
-            if index > 0 {
-                std::thread::sleep(CHEAT_INTERVAL);
-            }
-            if let Err(err) = keys::press(combo) {
-                failed.push(format!("{combo} ({err})"));
+        if trigger_cheats {
+            for (index, combo) in plan.cheats.iter().enumerate() {
+                if index > 0 {
+                    std::thread::sleep(CHEAT_INTERVAL);
+                }
+                if let Err(err) = keys::press(combo) {
+                    failed.push(format!("{combo} ({err})"));
+                }
             }
         }
 
-        // A newly opened trainer takes the foreground so it can receive its
-        // launch-time cheats. Put it away once that first batch is complete;
-        // repeat hotkeys only inject into the existing process and must leave
-        // the foreground game untouched.
-        if launched_now && has_cheats {
+        // A newly opened trainer stays foreground until its first cheat batch
+        // is complete. With auto-trigger disabled that batch arrives on the
+        // second hotkey, so that deferred trigger minimizes it too; later
+        // repeats leave the foreground game untouched.
+        if (trigger_cheats && (launched_now || !plan.auto_trigger_cheats))
+            || (launched_now && plan.close_after_launch && !plan.auto_trigger_cheats)
+        {
             let trainer_process = state.trainer.lock().unwrap_or_else(|err| err.into_inner());
             if let Some(process) = trainer_process.as_ref() {
                 process.minimize_if_foreground();
@@ -546,6 +570,8 @@ mod tests {
                     close_after_launch: true,
                 },
                 watched_exe: Some("C:\\Games\\RDR2.exe".to_string()),
+                auto_trigger_cheats: true,
+                cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
                 default_cheats: vec![
                     CheatConfig {
                         label: "Health".to_string(),
@@ -586,6 +612,8 @@ mod tests {
         assert_eq!(plan.hotkey.unwrap().canonical(), "Ctrl+Numpad9");
         let cheats: Vec<String> = plan.cheats.iter().map(KeyCombo::canonical).collect();
         assert_eq!(cheats, ["Numpad1", "Ctrl+Numpad2"]);
+        assert!(plan.auto_trigger_cheats);
+        assert_eq!(plan.cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
         assert!(plan.close_after_launch);
         assert_eq!(plan.watched_exe, Some(PathBuf::from("C:\\Games\\RDR2.exe")));
     }
@@ -627,6 +655,21 @@ mod tests {
         // still what resolves the name for the tray.
         assert_eq!(plan.filename, "rdr2-trainer.exe");
         assert_eq!(plan.display_name, "RDR2");
+        assert!(plan.auto_trigger_cheats);
+        assert_eq!(plan.cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
+    }
+
+    #[test]
+    fn saved_auto_trigger_and_delay_are_used_without_override() {
+        let folder = TrainerFolder::new("saved-trigger");
+        let mut cfg = config(folder.path());
+        cfg.trainers[0].auto_trigger_cheats = false;
+        cfg.trainers[0].cheat_delay_ms = 1_250;
+
+        let plan = plan(&options("rdr2-trainer.exe"), &cfg).unwrap();
+
+        assert!(!plan.auto_trigger_cheats);
+        assert_eq!(plan.cheat_delay_ms, 1_250);
     }
 
     // Under --override the global default shortcut is a saved value like any

@@ -35,8 +35,10 @@ documentation, and user-facing text:
 Both modes share this hotkey-triggered launch pipeline:
 
 1. Resolve the trainer and launch it.
-2. Wait until the trainer is ready, inject its configured default cheats, then
-   minimize the trainer.
+2. Wait until the trainer is ready. If its per-trainer auto-trigger setting is
+   enabled, wait its configured delay and inject its default cheats; otherwise
+   the next hotkey/launch action against the running trainer injects them.
+   Minimize as required by the launch origin.
 3. If `watched_exe` is configured, keep its launched-process handle and close
    the trainer after the watched game exits. Single trainer mode also exits
    Rallx after that cleanup; normal mode remains running. Close-after-launch
@@ -127,6 +129,9 @@ silently violate a requirement from another section.)
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
   (key/key-combo) entered via a record button that captures live key input. A
+  per-trainer auto-trigger toggle defaults on and reveals a delay field (the
+  existing three-second grace period is the default); when off, the first
+  launch skips cheats and the next trigger action sends them. A
   watched executable closes the launched trainer when it exits; Rallx itself
   then exits only in single trainer mode, not normal mode. When
   close-after-launch is enabled, it overrides watched cleanup and leaves the
@@ -159,6 +164,8 @@ silently violate a requirement from another section.)
   A per-trainer "close after launch" flag is only used to *generate* the
   `--closeafterlaunch` CLI flag for a launch script — it must never by itself
   close the app when launching from the UI.
+  When close-after-launch applies and auto-trigger is disabled, wait for the
+  trainer to open, minimize it, skip default cheats, and exit Rallx.
 
 ## Coding conventions
 
