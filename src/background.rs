@@ -161,6 +161,10 @@ pub fn plan(options: &LaunchOptions, config: &AppConfig) -> Result<BackgroundPla
 /// shown, so a hotkey held down doesn't stack up dialogs.
 static UIPI_WARNED: AtomicBool = AtomicBool::new(false);
 
+fn should_start_watched_cleanup(close_after_launch: bool, has_watched_exe: bool) -> bool {
+    has_watched_exe && !close_after_launch
+}
+
 #[derive(Default)]
 struct TriggerState {
     /// Retaining the process handle lets repeat hotkeys distinguish a running
@@ -345,7 +349,9 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
             crate::dialog::error(&format!("Could not send {}", failed.join(", ")));
         }
 
-        if launched_now {
+        if launched_now
+            && should_start_watched_cleanup(plan.close_after_launch, plan.watched_exe.is_some())
+        {
             if let Some(watched_exe) = plan.watched_exe.clone() {
                 if !state.watcher_started.swap(true, Ordering::SeqCst) {
                     let state = state.clone();
@@ -390,9 +396,7 @@ fn trigger(plan: Arc<BackgroundPlan>, state: Arc<TriggerState>, force_launch: bo
             }
         }
 
-        // Lifecycle cleanup has to keep Rallx alive until the watched app
-        // exits, so it takes precedence over the immediate CLI close flag.
-        if plan.close_after_launch && plan.watched_exe.is_none() {
+        if plan.close_after_launch {
             let _ = slint::invoke_from_event_loop(|| {
                 let _ = slint::quit_event_loop();
             });
@@ -658,6 +662,13 @@ mod tests {
 
         assert_eq!(with_global.hotkey.unwrap().canonical(), "Ctrl+F12");
         assert_eq!(without.hotkey, None);
+    }
+
+    #[test]
+    fn close_after_launch_suppresses_watched_cleanup() {
+        assert!(!should_start_watched_cleanup(true, true));
+        assert!(should_start_watched_cleanup(false, true));
+        assert!(!should_start_watched_cleanup(false, false));
     }
 
     #[test]

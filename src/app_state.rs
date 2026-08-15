@@ -674,8 +674,8 @@ fn should_minimize_normal_trainer(
     origin == NormalLaunchOrigin::GlobalHotkey && launched_now && has_cheats
 }
 
-fn should_close_after_normal_sequence(close_after_launch: bool, has_watcher: bool) -> bool {
-    close_after_launch && !has_watcher
+fn should_start_normal_watcher(close_after_launch: bool, has_watched_exe: bool) -> bool {
+    has_watched_exe && !close_after_launch
 }
 
 fn post_toast(app: slint::Weak<AppWindow>, message: impl Into<String>) {
@@ -937,14 +937,16 @@ fn request_normal_trainer_launch(
             }
         };
 
-        ensure_normal_watcher(
-            &launch_state,
-            &request.filename,
-            &request.name,
-            request.watched_exe.as_deref(),
-            &process,
-            app_weak.clone(),
-        );
+        if should_start_normal_watcher(request.close_after_launch, request.watched_exe.is_some()) {
+            ensure_normal_watcher(
+                &launch_state,
+                &request.filename,
+                &request.name,
+                request.watched_exe.as_deref(),
+                &process,
+                app_weak.clone(),
+            );
+        }
 
         if launched_now && has_cheats {
             let wait_result = process
@@ -1011,10 +1013,7 @@ fn request_normal_trainer_launch(
             );
         }
 
-        if should_close_after_normal_sequence(
-            request.close_after_launch,
-            request.watched_exe.is_some(),
-        ) {
+        if request.close_after_launch {
             let _ = slint::invoke_from_event_loop(|| {
                 let _ = slint::quit_event_loop();
             });
@@ -1862,9 +1861,9 @@ mod tests {
     }
 
     #[test]
-    fn watched_cleanup_takes_precedence_over_normal_close_after_launch() {
-        assert!(should_close_after_normal_sequence(true, false));
-        assert!(!should_close_after_normal_sequence(true, true));
-        assert!(!should_close_after_normal_sequence(false, false));
+    fn normal_close_after_launch_suppresses_watched_cleanup() {
+        assert!(!should_start_normal_watcher(true, true));
+        assert!(should_start_normal_watcher(false, true));
+        assert!(!should_start_normal_watcher(false, false));
     }
 }

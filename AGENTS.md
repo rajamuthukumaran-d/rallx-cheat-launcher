@@ -39,18 +39,17 @@ Both modes share this hotkey-triggered launch pipeline:
    minimize the trainer.
 3. If `watched_exe` is configured, keep its launched-process handle and close
    the trainer after the watched game exits. Single trainer mode also exits
-   Rallx after that cleanup; normal mode remains running.
+   Rallx after that cleanup; normal mode remains running. Close-after-launch
+   overrides this cleanup as described below.
 4. If close-after-launch is enabled, exit Rallx only after the trainer has
    opened and the default-cheat sequence has completed. Normal mode uses the
    global Settings toggle. Single trainer mode uses the per-run
    `--closeafterlaunch` flag (normally generated from the trainer's saved
    launch-script setting).
 
-There is an unresolved precedence conflict when both `watched_exe` and
-close-after-launch are enabled: exiting Rallx immediately makes it impossible
-to retain the process handle and close the trainer when the game later exits.
-Do not silently choose a precedence; get a product decision before changing
-that combination's behavior.
+When both `watched_exe` and close-after-launch are enabled, close-after-launch
+takes precedence: inject any default cheats, exit Rallx, and leave the trainer
+running. Do not start watched-executable cleanup in this combination.
 
 ## Tech stack
 
@@ -129,7 +128,9 @@ silently violate a requirement from another section.)
   editable name, exe picker, launch shortcut assignment, list of default cheats
   (key/key-combo) entered via a record button that captures live key input. A
   watched executable closes the launched trainer when it exits; Rallx itself
-  then exits only in single trainer mode, not normal mode.
+  then exits only in single trainer mode, not normal mode. When
+  close-after-launch is enabled, it overrides watched cleanup and leaves the
+  trainer running.
 - **Trainer launching:** click/play/A-button launches the trainer executable,
   resolved relative to the configured trainer folder (trainers are referenced
   by filename only, never full path). Normal UI and global-hotkey launches wait

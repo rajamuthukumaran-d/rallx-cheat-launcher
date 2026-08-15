@@ -69,9 +69,9 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - Dragging and dropping a exe will show add trainer window and confirming will move that file inside the trainer folder
 - When adding a trainer, user has option to set launch option and default trainer shotcuts. Selecting these option only save them. When copy a launch script will be generated based on these selection
 - Globally in settings and when launching individual trainer there is an option to close the app after launching the trainer. If enabled it will close the app once the trainer is launched and default cheats are entered
-- A trainer with a watched executable stays open regardless of the immediate
-  close-after-launch setting, because Rallx must remain running to detect when
-  the watched app closes and clean up the trainer.
+- When a trainer has a watched executable and close-after-launch is also
+  enabled, close-after-launch takes precedence: Rallx exits after triggering
+  any default cheats and leaves the trainer running without watched cleanup.
 - If a trainer is launched from the app where the trainer had close after launch checked. It should be ignored and the app should follow if it is checked globally inside settings page. The individual "close after launch" option is only for generating launch option. If the launch option have "--closeafterlaunch" then it should close after launching and activating default cheats
 
 ## Design,
