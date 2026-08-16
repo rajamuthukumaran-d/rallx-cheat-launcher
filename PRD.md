@@ -24,6 +24,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 ## Settings:
 - It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
 - Theme will have accent, background and style
+- Appearance includes an option to launch the normal app in borderless
+  fullscreen mode without a title bar (off by default)
 - Option to close the app after launching trainer (off by default)
 - "Run in background" option for normal app mode (off by default). When enabled, Rallx starts
   hidden in the system tray and minimizing its window returns it to the tray,

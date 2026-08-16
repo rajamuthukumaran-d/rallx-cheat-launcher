@@ -121,7 +121,9 @@ silently violate a requirement from another section.)
   Y=search, Select=delete w/ confirm, RB=copy launch script, Start=settings);
   "close after launching" checkbox.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
-  (accent/background/style), global "close app after launching trainer",
+  (accent/background/style), an off-by-default option to launch the normal app
+  in borderless fullscreen mode without a title bar, global "close app after
+  launching trainer",
   normal-mode "run in background" (start hidden in the tray and minimize to
   tray while retaining the global running-game hotkey; this remains normal
   mode and is separate from single trainer mode), "start on login" (register

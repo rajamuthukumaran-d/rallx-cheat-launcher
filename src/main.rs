@@ -281,7 +281,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instance = Rc::new(instance);
 
     let start_in_background = config.run_in_background;
+    let launch_fullscreen = config.launch_fullscreen;
     let app = create_window()?;
+    app.window().set_fullscreen(launch_fullscreen);
 
     app_state::wire(&app, config, app_state::AppMode::Windowed);
     let tray = WindowedTrayIcon::new()?;

@@ -189,6 +189,9 @@ pub struct AppConfig {
     /// current user signs in.
     #[serde(default)]
     pub start_on_login: bool,
+    /// Whether the normal app window opens in borderless fullscreen mode.
+    #[serde(default)]
+    pub launch_fullscreen: bool,
     /// Whether startup should hand off to an elevated copy of the app.
     #[serde(default = "default_true")]
     pub run_as_admin: bool,
@@ -206,6 +209,7 @@ impl Default for AppConfig {
             confirm_exit: true,
             run_in_background: false,
             start_on_login: false,
+            launch_fullscreen: false,
             run_as_admin: true,
             trainers: Vec::new(),
         }
@@ -294,6 +298,7 @@ mod tests {
         assert!(config.confirm_exit);
         assert!(!config.run_in_background);
         assert!(!config.start_on_login);
+        assert!(!config.launch_fullscreen);
         assert_eq!(
             config.default_shortcut.as_deref(),
             Some("Ctrl+Alt+Shift+F3")
@@ -310,6 +315,7 @@ mod tests {
             confirm_exit: false,
             run_in_background: true,
             start_on_login: true,
+            launch_fullscreen: true,
             run_as_admin: false,
             ..AppConfig::default()
         };
@@ -325,6 +331,7 @@ mod tests {
         assert!(!loaded.confirm_exit);
         assert!(loaded.run_in_background);
         assert!(loaded.start_on_login);
+        assert!(loaded.launch_fullscreen);
         assert!(!loaded.run_as_admin);
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());
