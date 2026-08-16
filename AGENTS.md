@@ -116,9 +116,10 @@ Designs are located in [`mockups/mockup.html`](./mockups/mockup.html). When impl
 silently violate a requirement from another section.)
 
 - **Home screen:** trainer list (logo from exe, name, version, size, play icon);
-  edit mode reveals copy/edit/delete icons; add + settings icons at top; full
-  gamepad mapping (A=launch, X=edit, Y=search, Select=delete w/ confirm,
-  RB=copy launch script, Start=settings); "close after launching" checkbox.
+  clicking a row opens Edit while only its play icon launches; search, refresh,
+  add, and settings icons at top; full gamepad mapping (A=launch, X=edit,
+  Y=search, Select=delete w/ confirm, RB=copy launch script, Start=settings);
+  "close after launching" checkbox.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
   (accent/background/style), global "close app after launching trainer",
   normal-mode "run in background" (start hidden in the tray and minimize to
@@ -130,18 +131,22 @@ silently violate a requirement from another section.)
   and run as administrator on.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
-  (key/key-combo) entered via a record button that captures live key input. A
-  per-trainer auto-trigger toggle defaults off and reveals a delay field (the
+  (key/key-combo) entered via a record button that captures live key input.
+  When editing, header actions launch, copy the launch script, or delete after
+  confirmation. A per-trainer auto-trigger toggle defaults off and reveals a
+  delay field (the
   existing three-second grace period is the default); when off, the first
   launch skips cheats and the next trigger action sends them. A
   watched executable closes the launched trainer when it exits; Rallx itself
   then exits only in single trainer mode, not normal mode. When
   close-after-launch is enabled, it overrides watched cleanup and leaves the
   trainer running.
-- **Trainer launching:** click/play/A-button launches the trainer executable,
-  resolved relative to the configured trainer folder (trainers are referenced
-  by filename only, never full path). Normal UI and global-hotkey launches wait
-  for readiness and inject saved default cheats; only a fresh hotkey-triggered
+- **Trainer launching:** the row play button, the Edit popup's Play action, or
+  gamepad A launches the trainer executable; clicking the rest of a Home row
+  opens Edit. The trainer is resolved relative to the configured trainer folder
+  (trainers are referenced by filename only, never full path). Normal UI and
+  global-hotkey launches wait for readiness and inject saved default cheats;
+  only a fresh hotkey-triggered
   launch with cheats minimizes the trainer. Retained process state prevents
   repeated hotkeys from launching duplicates, and close-after-launch runs only
   after cheat injection finishes.

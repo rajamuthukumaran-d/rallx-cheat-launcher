@@ -4,12 +4,10 @@ import { IconButton } from "icon-button.slint";
 
 export component TrainerRow inherits Rectangle {
     in property <TrainerItem> trainer;
-    in property <bool> edit-mode: false;
     in property <bool> selected: false;
 
     callback launch();
     callback edit();
-    callback delete();
     callback select();
 
     // ListView only permits a single `for` as its direct child, so row-to-row
@@ -91,29 +89,6 @@ export component TrainerRow inherits Rectangle {
                     Text { text: trainer.size; color: Theme.text-dim; font-size: 13px; }
                     if trainer.version != "": Text { text: "·"; color: Theme.text-dim; font-size: 13px; }
                     if trainer.version != "": Text { text: "v" + trainer.version; color: Theme.text-dim; font-size: 13px; }
-                }
-            }
-
-            if edit-mode: HorizontalLayout {
-                spacing: 8px;
-                alignment: end;
-                cross-axis-alignment: center;
-
-                IconButton {
-                    icon: @image-url("../../assets/images/icons/edit.svg");
-                    icon-size: 17px;
-                    button-size: 38px;
-                    icon-color: Theme.text-dim;
-                    tooltip-text: "Edit";
-                    clicked => { root.edit(); }
-                }
-                IconButton {
-                    icon: @image-url("../../assets/images/icons/delete.svg");
-                    icon-size: 17px;
-                    button-size: 38px;
-                    icon-color: Theme.danger;
-                    tooltip-text: "Delete";
-                    clicked => { root.delete(); }
                 }
             }
 

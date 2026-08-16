@@ -27,7 +27,6 @@ export component AppWindow inherits Window {
     background: Theme.bg;
 
     in-out property <AppView> view: AppView.home;
-    in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in-out property <bool> close-after-launch: false;
@@ -52,7 +51,7 @@ export component AppWindow inherits Window {
     // when the app opens, before any gamepad/keyboard input.
     in-out property <int> focused-index: 0;
     // True when focus has moved off the trainer list up into the home
-    // screen's header row (Search/Refresh/Edit/Add/Settings).
+    // screen's header row (Search/Refresh/Add/Settings).
     in-out property <bool> home-header-focused: false;
     in-out property <int> home-header-index: 0;
     private property <int> search-focus-sequence: 0;
@@ -350,10 +349,10 @@ export component AppWindow inherits Window {
         root.form-sub-index = max(0, min(root.form-sub-index + delta, root.form-sub-count() - 1));
     }
 
-    // Home screen header has 5 stops: Search, Refresh, Edit, Add, Settings.
+    // Home screen header has 4 stops: Search, Refresh, Add, Settings.
     // Keep in sync with activate-home-header() and HomeScreen's layout.
     function move-home-header(delta: int) {
-        root.home-header-index = max(0, min(root.home-header-index + delta, 4));
+        root.home-header-index = max(0, min(root.home-header-index + delta, 3));
     }
 
     function move-keyboard-vertical(delta: int) {
@@ -694,10 +693,8 @@ export component AppWindow inherits Window {
         } else if root.home-header-index == 1 {
             root.refresh-trainers();
         } else if root.home-header-index == 2 {
-            root.edit-mode = !root.edit-mode;
-        } else if root.home-header-index == 3 {
             root.request-add();
-        } else if root.home-header-index == 4 {
+        } else if root.home-header-index == 3 {
             root.open-settings-view();
         }
     }
@@ -1096,7 +1093,6 @@ export component AppWindow inherits Window {
         if root.view == AppView.home: HomeScreen {
             width: 100%;
             height: 100%;
-            edit-mode <=> root.edit-mode;
             show-search <=> root.show-search;
             search-query <=> root.search-query;
             search-focus-sequence: root.search-focus-sequence;
@@ -1115,7 +1111,6 @@ export component AppWindow inherits Window {
             refresh => { root.refresh-trainers(); }
             launch-trainer(id) => { root.launch-trainer(id); }
             edit-trainer(id) => { root.open-edit(id); }
-            delete-trainer(id) => { root.request-delete(id); }
             search-changed(q) => { root.search-changed(q); }
         }
 
