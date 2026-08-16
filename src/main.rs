@@ -25,6 +25,7 @@ mod key_capture;
 mod keys;
 mod launch_args;
 mod renderer;
+mod startup;
 mod trainer;
 
 /// Slint's default renderer fails on some handheld GPU drivers; the software
@@ -209,6 +210,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // The app is portable, so it may have moved since its login task or
+    // registry entry was created. Elevated tasks are repaired only after the
+    // startup handoff above, when this process has permission to replace one.
+    if config.start_on_login {
+        if let Err(err) = startup::set_enabled(true, config.run_as_admin) {
+            dialog::warning(&format!("Could not update Windows login startup: {err}"));
+        }
+    }
+
     // Launch options select tray mode: the window is constructed but stays
     // hidden until the tray icon asks for it.
     if let Some(options) = options {
@@ -306,4 +316,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Nothing outside this process has happened yet, so a renderer failure here
     // is always safe to restart from.
     renderer::recover(outcome, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_settings_does_not_report_a_login_startup_change() {
+        let app = create_window().expect("creates window component");
+        app.set_start_on_login(true);
+        app.set_run_as_admin(true);
+
+        let callback_count = Rc::new(Cell::new(0));
+        let observed_count = callback_count.clone();
+        app.on_login_startup_changed(move |_, _| {
+            observed_count.set(observed_count.get() + 1);
+        });
+
+        app.invoke_open_settings_view();
+
+        assert_eq!(callback_count.get(), 0);
+    }
 }

@@ -124,7 +124,10 @@ silently violate a requirement from another section.)
   (accent/background/style), global "close app after launching trainer",
   normal-mode "run in background" (start hidden in the tray and minimize to
   tray while retaining the global running-game hotkey; this remains normal
-  mode and is separate from single trainer mode),
+  mode and is separate from single trainer mode), "start on login" (register
+  the normal app for the current user's Windows login; use a highest-privilege
+  logon task with a brief Explorer-readiness delay when administrator mode is
+  enabled, so tray startup is reliable; off by default),
   "run as administrator" (applied at next startup) plus a restart-elevated
   button that is disabled once the process is already elevated. Defaults are:
   run in background off, close after launch off, confirm before closing on,

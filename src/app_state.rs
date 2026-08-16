@@ -19,8 +19,8 @@ use crate::config::{
     DEFAULT_CHEAT_DELAY_MS,
 };
 use crate::{
-    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
-    CheatEntry, Palette, Theme, TrainerItem,
+    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, startup, trainer,
+    AppWindow, CheatEntry, Palette, Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -91,6 +91,7 @@ struct AppState {
     hotkey_poll_timer: Timer,
     hotkey_scan_in_progress: Arc<AtomicBool>,
     normal_launch_state: Arc<NormalLaunchState>,
+    login_startup_update_in_progress: Cell<bool>,
 }
 
 fn row_color(index: usize) -> Color {
@@ -545,6 +546,7 @@ fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_close_after_launch(config.close_after_launch_global);
     app.set_confirm_exit(config.confirm_exit);
     app.set_run_in_background(config.run_in_background);
+    app.set_start_on_login(config.start_on_login);
     app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
@@ -568,6 +570,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.close_after_launch_global = app.get_close_after_launch();
     config.confirm_exit = app.get_confirm_exit();
     config.run_in_background = app.get_run_in_background();
+    config.start_on_login = app.get_start_on_login();
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,
@@ -582,6 +585,57 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.theme.set_compact(theme.get_compact());
 
     let _ = crate::config::save_config(&config);
+}
+
+fn update_login_startup(state: &AppState, enabled: bool, run_as_admin: bool) -> Result<(), String> {
+    let (previous_enabled, previous_admin) = {
+        let config = state.config.borrow();
+        (config.start_on_login, config.run_as_admin)
+    };
+    if (enabled, run_as_admin) == (previous_enabled, previous_admin) {
+        return Ok(());
+    }
+
+    let startup_changed = enabled || previous_enabled;
+    if startup_changed {
+        if let Err(err) = startup::set_enabled(enabled, run_as_admin) {
+            let rollback = startup::set_enabled(previous_enabled, previous_admin).err();
+            let mut message = format!("Could not update Windows login startup: {err}");
+            if let Some(rollback_err) = rollback {
+                message.push_str(&format!(
+                    ". Its previous state could not be restored: {rollback_err}"
+                ));
+            }
+            return Err(message);
+        }
+    }
+
+    let save_result = {
+        let mut config = state.config.borrow_mut();
+        config.start_on_login = enabled;
+        config.run_as_admin = run_as_admin;
+        crate::config::save_config(&config)
+    };
+
+    if let Err(err) = save_result {
+        {
+            let mut config = state.config.borrow_mut();
+            config.start_on_login = previous_enabled;
+            config.run_as_admin = previous_admin;
+        }
+        let rollback = startup_changed
+            .then(|| startup::set_enabled(previous_enabled, previous_admin).err())
+            .flatten();
+        let mut message = format!("Could not save the login startup settings: {err}");
+        if let Some(rollback_err) = rollback {
+            message.push_str(&format!(
+                ". Windows startup could not be restored: {rollback_err}"
+            ));
+        }
+        return Err(message);
+    }
+
+    Ok(())
 }
 
 struct LaunchScript {
@@ -1196,6 +1250,7 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
         hotkey_poll_timer: Timer::default(),
         hotkey_scan_in_progress: Arc::new(AtomicBool::new(false)),
         normal_launch_state: Arc::new(NormalLaunchState::default()),
+        login_startup_update_in_progress: Cell::new(false),
     });
 
     let items = rescan_trainer_folder(&state);
@@ -1243,6 +1298,25 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
             // elevate::finish_requested_restart.
             elevate::request_restart();
             let _ = slint::quit_event_loop();
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_login_startup_changed(move |enabled, run_as_admin| {
+            let app = app_weak.unwrap();
+            if state.login_startup_update_in_progress.replace(true) {
+                return;
+            }
+
+            if let Err(err) = update_login_startup(&state, enabled, run_as_admin) {
+                let config = state.config.borrow();
+                app.set_start_on_login(config.start_on_login);
+                app.set_run_as_admin(config.run_as_admin);
+                show_toast(&app, err);
+            }
+            state.login_startup_update_in_progress.set(false);
         });
     }
 
