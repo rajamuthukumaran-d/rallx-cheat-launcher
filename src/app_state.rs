@@ -1304,6 +1304,25 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
     {
         let app_weak = app.as_weak();
         let state = state.clone();
+        app.on_enable_close_after_launch(move || {
+            let app = app_weak.unwrap();
+
+            if app.get_start_on_login() {
+                if let Err(err) = update_login_startup(&state, false, app.get_run_as_admin()) {
+                    show_toast(&app, err);
+                    return;
+                }
+            }
+
+            app.set_start_on_login(false);
+            app.set_run_in_background(false);
+            app.set_close_after_launch(true);
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_login_startup_changed(move |enabled, run_as_admin| {
             let app = app_weak.unwrap();
             if state.login_startup_update_in_progress.replace(true) {

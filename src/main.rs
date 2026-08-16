@@ -217,7 +217,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => fatal(&err.to_string(), 2),
     };
 
-    let config = config::load_config();
+    let mut config = config::load_config();
+    let login_startup_was_enabled = config.start_on_login;
+    let settings_were_normalized = config.enforce_setting_dependencies();
 
     // Trainer-specific tray launches carry independent hotkeys and overrides,
     // so only the ordinary normal-mode app is a singleton.
@@ -256,9 +258,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The app is portable, so it may have moved since its login task or
     // registry entry was created. Elevated tasks are repaired only after the
     // startup handoff above, when this process has permission to replace one.
-    if config.start_on_login {
+    if login_startup_was_enabled && !config.start_on_login {
+        if let Err(err) = startup::set_enabled(false, config.run_as_admin) {
+            dialog::warning(&format!("Could not disable Windows login startup: {err}"));
+        }
+    } else if config.start_on_login {
         if let Err(err) = startup::set_enabled(true, config.run_as_admin) {
             dialog::warning(&format!("Could not update Windows login startup: {err}"));
+        }
+    }
+    if settings_were_normalized {
+        if let Err(err) = config::save_config(&config) {
+            dialog::warning(&format!("Could not save the updated settings: {err}"));
         }
     }
 
@@ -407,7 +418,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opening_settings_does_not_report_a_login_startup_change() {
+    fn settings_dependencies_and_confirmation_are_enforced() {
         let app = create_window().expect("creates window component");
         app.set_start_on_login(true);
         app.set_run_as_admin(true);
@@ -421,5 +432,33 @@ mod tests {
         app.invoke_open_settings_view();
 
         assert_eq!(callback_count.get(), 0);
+
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        app.invoke_request_toggle_start_on_login();
+        assert!(app.get_start_on_login());
+        assert!(app.get_run_in_background());
+
+        app.invoke_request_toggle_run_in_background();
+        assert!(app.get_run_in_background());
+
+        app.invoke_request_toggle_close_after_launch();
+
+        assert!(app.get_show_close_after_launch_confirm());
+        assert!(!app.get_close_after_launch());
+        assert_eq!(app.get_confirm_popup_index(), 0);
+
+        app.set_show_close_after_launch_confirm(false);
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        let app_weak = app.as_weak();
+        app.on_enable_close_after_launch(move || {
+            app_weak.unwrap().set_close_after_launch(true);
+        });
+
+        app.invoke_request_toggle_close_after_launch();
+
+        assert!(app.get_close_after_launch());
+        assert!(!app.get_show_close_after_launch_confirm());
     }
 }

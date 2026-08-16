@@ -8,6 +8,7 @@ import { AddEditTrainerModal } from "modals/add-edit-trainer-modal.slint";
 import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
 import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
+import { CloseAfterLaunchConfirmModal } from "modals/close-after-launch-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
 import { TrayIcon, WindowedTrayIcon } from "tray.slint";
 
@@ -44,9 +45,10 @@ export component AppWindow inherits Window {
     in-out property <bool> run-as-admin: true;
     in property <bool> is-elevated: false;
     in-out property <bool> show-quit-confirm: false;
-    // Left/right position shared by the delete-confirm, key-recorder, and
-    // quit-confirm popups - they're mutually exclusive, so one property covers
-    // all three. Delete/quit use 0 = Cancel, 1 = Confirm; the recorder uses
+    in-out property <bool> show-close-after-launch-confirm: false;
+    // Left/right position shared by the confirm popups and key recorder. They
+    // are mutually exclusive, so one property covers them all. Confirms use
+    // 0 = Cancel, 1 = Confirm; the recorder uses
     // 0 = Cancel, 1 = Clear, 2 = Use combo.
     in-out property <int> confirm-popup-index: 1;
     // Defaults to the first row so the trainer list is already highlighted
@@ -176,7 +178,7 @@ export component AppWindow inherits Window {
     // popup-open() minus the keyboard itself, for the few actions (namely Y/
     // open-search-keyboard) that need to run *while* the keyboard is open.
     function other-popup-open() -> bool {
-        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0 || root.show-quit-confirm;
+        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0 || root.show-quit-confirm || root.show-close-after-launch-confirm;
     }
 
     // Keep in sync with SettingsScreen's control layout: trainer folder,
@@ -433,7 +435,7 @@ export component AppWindow inherits Window {
             root.confirm-popup-index = max(0, min(root.confirm-popup-index + delta, 2));
             return;
         }
-        if root.delete-confirm-id >= 0 || root.show-quit-confirm {
+        if root.delete-confirm-id >= 0 || root.show-quit-confirm || root.show-close-after-launch-confirm {
             root.confirm-popup-index = max(0, min(root.confirm-popup-index + delta, 1));
             return;
         }
@@ -456,7 +458,7 @@ export component AppWindow inherits Window {
             root.move-keyboard-vertical(delta);
             return;
         }
-        if root.recording || root.delete-confirm-id >= 0 || root.show-quit-confirm {
+        if root.recording || root.delete-confirm-id >= 0 || root.show-quit-confirm || root.show-close-after-launch-confirm {
             return;
         }
         if root.show-add-edit {
@@ -798,11 +800,11 @@ export component AppWindow inherits Window {
         } else if root.settings-focused-index == 1 {
             root.start-default-shortcut-recording();
         } else if root.settings-focused-index == 2 {
-            root.run-in-background = !root.run-in-background;
+            root.request-toggle-run-in-background();
         } else if root.settings-focused-index == 3 {
-            root.start-on-login = !root.start-on-login;
+            root.request-toggle-start-on-login();
         } else if root.settings-focused-index == 4 {
-            root.close-after-launch = !root.close-after-launch;
+            root.request-toggle-close-after-launch();
         } else if root.settings-focused-index == 5 {
             root.confirm-exit = !root.confirm-exit;
         } else if root.settings-focused-index == 6 {
@@ -963,6 +965,43 @@ export component AppWindow inherits Window {
         }
     }
 
+    public function request-toggle-run-in-background() {
+        if !root.close-after-launch && !root.start-on-login {
+            root.run-in-background = !root.run-in-background;
+        }
+    }
+
+    public function request-toggle-start-on-login() {
+        if root.close-after-launch {
+            return;
+        }
+        if root.start-on-login {
+            root.start-on-login = false;
+        } else {
+            root.run-in-background = true;
+            root.start-on-login = true;
+        }
+    }
+
+    public function request-toggle-close-after-launch() {
+        if root.close-after-launch {
+            root.close-after-launch = false;
+        } else if root.run-in-background || root.start-on-login {
+            root.confirm-popup-index = 0;
+            root.show-close-after-launch-confirm = true;
+        } else {
+            root.enable-close-after-launch();
+        }
+    }
+
+    function close-close-after-launch-confirm(confirmed: bool) {
+        root.show-close-after-launch-confirm = false;
+        root.confirm-popup-index = 1;
+        if confirmed {
+            root.enable-close-after-launch();
+        }
+    }
+
     // Dispatches A/Return to whichever popup is currently on top - the
     // virtual keyboard (which can itself be layered over the add/edit form),
     // then the quit confirmation, then the key recorder, then add/edit form,
@@ -976,6 +1015,8 @@ export component AppWindow inherits Window {
     public function gamepad-accept(via-gamepad: bool) {
         if root.show-keyboard {
             root.activate-keyboard-key();
+        } else if root.show-close-after-launch-confirm {
+            root.close-close-after-launch-confirm(root.confirm-popup-index == 1);
         } else if root.show-quit-confirm {
             root.close-quit-confirm(root.confirm-popup-index == 1);
         } else if root.recording {
@@ -1020,6 +1061,8 @@ export component AppWindow inherits Window {
     public function gamepad-cancel() {
         if root.show-keyboard {
             root.close-keyboard();
+        } else if root.show-close-after-launch-confirm {
+            root.close-close-after-launch-confirm(false);
         } else if root.show-quit-confirm {
             root.close-quit-confirm(false);
         } else if root.recording {
@@ -1067,6 +1110,7 @@ export component AppWindow inherits Window {
     // controls or the gamepad path; app_state reads the current values back
     // off this window and writes them to config.json.
     callback settings-changed();
+    callback enable-close-after-launch();
     // Lets normal windowed startup show or hide its tray icon immediately when
     // the setting changes. CLI launch-option mode does not subscribe to this.
     callback run-in-background-changed(bool);
@@ -1203,6 +1247,9 @@ export component AppWindow inherits Window {
             set-accent(value) => { root.set-accent(value); }
             set-dark-theme(on) => { root.set-dark-theme(on); }
             set-compact-rows(on) => { root.set-compact-rows(on); }
+            toggle-run-in-background => { root.request-toggle-run-in-background(); }
+            toggle-start-on-login => { root.request-toggle-start-on-login(); }
+            toggle-close-after-launch => { root.request-toggle-close-after-launch(); }
         }
 
         if root.delete-confirm-id >= 0: DeleteConfirmModal {
@@ -1216,6 +1263,12 @@ export component AppWindow inherits Window {
             confirm-focused: root.confirm-popup-index == 1;
             cancel => { root.close-quit-confirm(false); }
             confirm => { root.close-quit-confirm(true); }
+        }
+
+        if root.show-close-after-launch-confirm: CloseAfterLaunchConfirmModal {
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-close-after-launch-confirm(false); }
+            confirm => { root.close-close-after-launch-confirm(true); }
         }
 
         // Kept instantiated and merely hidden, unlike the other modals:
