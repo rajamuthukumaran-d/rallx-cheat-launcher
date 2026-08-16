@@ -2,6 +2,8 @@ import { Theme } from "../theme.slint";
 
 export component ToggleSwitch inherits Rectangle {
     in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    in property <bool> toggle-on-click: true;
     in property <length> track-width: 42px;
     in property <length> track-height: 24px;
     callback toggled();
@@ -10,6 +12,7 @@ export component ToggleSwitch inherits Rectangle {
     height: track-height;
     border-radius: track-height / 2;
     background: checked ? Theme.accent : Theme.border;
+    opacity: enabled ? 1.0 : 0.45;
 
     animate background { duration: 120ms; }
 
@@ -25,8 +28,11 @@ export component ToggleSwitch inherits Rectangle {
     }
 
     TouchArea {
+        enabled: root.enabled;
         clicked => {
-            root.checked = !root.checked;
+            if root.toggle-on-click {
+                root.checked = !root.checked;
+            }
             root.toggled();
         }
     }

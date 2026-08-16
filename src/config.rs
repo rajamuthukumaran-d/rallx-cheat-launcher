@@ -212,6 +212,33 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    /// Keeps the three startup/lifetime settings in a valid combination.
+    /// Closing after a launch takes precedence; otherwise login startup always
+    /// runs in the background.
+    pub fn enforce_setting_dependencies(&mut self) -> bool {
+        let previous = (
+            self.close_after_launch_global,
+            self.run_in_background,
+            self.start_on_login,
+        );
+
+        if self.close_after_launch_global {
+            self.run_in_background = false;
+            self.start_on_login = false;
+        } else if self.start_on_login {
+            self.run_in_background = true;
+        }
+
+        previous
+            != (
+                self.close_after_launch_global,
+                self.run_in_background,
+                self.start_on_login,
+            )
+    }
+}
+
 /// config.json lives next to the executable, so the app is self-contained and
 /// needs nothing on disk to find its own settings - the trainer folder is just
 /// one more value inside it.
@@ -329,6 +356,35 @@ mod tests {
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());
         assert!(loaded.theme.is_compact());
+    }
+
+    #[test]
+    fn start_on_login_requires_background_mode() {
+        let mut config = AppConfig {
+            start_on_login: true,
+            run_in_background: false,
+            ..AppConfig::default()
+        };
+
+        assert!(config.enforce_setting_dependencies());
+        assert!(config.start_on_login);
+        assert!(config.run_in_background);
+        assert!(!config.enforce_setting_dependencies());
+    }
+
+    #[test]
+    fn close_after_launch_disables_background_startup_settings() {
+        let mut config = AppConfig {
+            close_after_launch_global: true,
+            start_on_login: true,
+            run_in_background: true,
+            ..AppConfig::default()
+        };
+
+        assert!(config.enforce_setting_dependencies());
+        assert!(config.close_after_launch_global);
+        assert!(!config.start_on_login);
+        assert!(!config.run_in_background);
     }
 
     #[test]

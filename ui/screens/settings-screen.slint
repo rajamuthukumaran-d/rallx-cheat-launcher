@@ -79,6 +79,9 @@ export component SettingsScreen inherits Rectangle {
     callback browse-folder();
     callback record-default-shortcut();
     callback restart-as-admin();
+    callback toggle-run-in-background();
+    callback toggle-start-on-login();
+    callback toggle-close-after-launch();
     // Theme changes go back up to AppWindow rather than writing the Theme
     // global here, so they can be persisted - see AppWindow.set-accent etc.
     callback set-accent(color);
@@ -233,7 +236,11 @@ export component SettingsScreen inherits Rectangle {
                                     font-weight: root.focused-index == 2 ? 800 : 600;
                                 }
                                 Text {
-                                    text: "Start in the system tray and keep listening for the global running-game shortcut. Minimizing Rallx also sends it to the tray.";
+                                    text: root.close-after-launch
+                                        ? "Unavailable while Close app after launching trainer is enabled."
+                                        : root.start-on-login
+                                            ? "Required while Start on login is enabled. Turn off Start on login to change this setting."
+                                            : "Start in the system tray and keep listening for the global running-game shortcut. Minimizing Rallx also sends it to the tray.";
                                     color: Theme.text-dim;
                                     font-size: 13px;
                                     wrap: word-wrap;
@@ -243,7 +250,10 @@ export component SettingsScreen inherits Rectangle {
                             ToggleSwitch {
                                 track-width: 46px;
                                 track-height: 26px;
-                                checked <=> root.run-in-background;
+                                checked: root.run-in-background;
+                                enabled: !root.close-after-launch && !root.start-on-login;
+                                toggle-on-click: false;
+                                toggled => { root.toggle-run-in-background(); }
                             }
                         }
 
@@ -268,7 +278,9 @@ export component SettingsScreen inherits Rectangle {
                                     font-weight: root.focused-index == 3 ? 800 : 600;
                                 }
                                 Text {
-                                    text: "Start Rallx automatically after you sign in to Windows. Run in background controls whether it opens in the tray; administrator mode uses an elevated Windows login task.";
+                                    text: root.close-after-launch
+                                        ? "Unavailable while Close app after launching trainer is enabled."
+                                        : "Start Rallx automatically in the system tray after you sign in to Windows. Enabling this also enables Run in background.";
                                     color: Theme.text-dim;
                                     font-size: 13px;
                                     wrap: word-wrap;
@@ -278,7 +290,10 @@ export component SettingsScreen inherits Rectangle {
                             ToggleSwitch {
                                 track-width: 46px;
                                 track-height: 26px;
-                                checked <=> root.start-on-login;
+                                checked: root.start-on-login;
+                                enabled: !root.close-after-launch;
+                                toggle-on-click: false;
+                                toggled => { root.toggle-start-on-login(); }
                             }
                         }
 
@@ -303,7 +318,9 @@ export component SettingsScreen inherits Rectangle {
                             ToggleSwitch {
                                 track-width: 46px;
                                 track-height: 26px;
-                                checked <=> root.close-after-launch;
+                                checked: root.close-after-launch;
+                                toggle-on-click: false;
+                                toggled => { root.toggle-close-after-launch(); }
                             }
                         }
 

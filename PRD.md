@@ -28,15 +28,20 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - "Run in background" option for normal app mode (off by default). When enabled, Rallx starts
   hidden in the system tray and minimizing its window returns it to the tray,
   while the global shortcut continues matching the running game's watched
-  executable. This is separate from `--launch` background mode.
+  executable. This is separate from `--launch` background mode. Start on login
+  requires this setting, enables it automatically, and prevents it from being
+  turned off until Start on login is disabled.
 - "Start on login" option (off by default). When enabled, Windows starts the
-  normal app automatically after the current user signs in. The "Run in
-  background" setting independently controls whether that automatic start is
-  hidden in the system tray or opens the main window. When "Run as
-  administrator" is also enabled, use a highest-privilege Windows logon task
-  so subsequent automatic starts do not show a UAC prompt. Delay that task
-  briefly until Explorer's notification area is ready.
-- Confirm before closing the app is on by default.
+  normal app automatically in the system tray after the current user signs in.
+  When "Run as administrator" is also enabled, use a highest-privilege Windows
+  logon task so subsequent automatic starts do not show a UAC prompt. Delay
+  that task briefly until Explorer's notification area is ready.
+- Enabling "Close app after launching trainer" disables Run in background and
+  Start on login. If either conflicting setting is active, ask for confirmation
+  before enabling it; otherwise enable it immediately. Disabled settings show
+  why they are unavailable.
+- Confirm before closing the app is on by default and applies to the title-bar
+  close button as well as keyboard and gamepad close actions.
 - Option to run as administrator, plus a button to restart into it right away
     - Run as administrator is on by default.
     - Windows blocks injected key presses aimed at an elevated program, so default cheats only reach a trainer that needs admin rights when the app is elevated too

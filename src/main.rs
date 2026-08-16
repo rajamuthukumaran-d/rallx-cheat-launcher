@@ -184,6 +184,32 @@ fn show_windowed_app(
     Ok(())
 }
 
+fn set_windowed_tray_enabled(
+    app: &AppWindow,
+    tray: &WindowedTrayIcon,
+    enabled: bool,
+) -> Result<(), slint::PlatformError> {
+    if !enabled {
+        // A visible SystemTrayIcon participates in Slint's event-loop
+        // keepalive, so establish the foreground window's lifetime before
+        // releasing the icon.
+        app.window().set_minimized(false);
+        app.show()?;
+    }
+    tray.set_active(enabled);
+    Ok(())
+}
+
+fn request_close_confirmation(app: &AppWindow) -> bool {
+    if !app.get_confirm_exit() {
+        return false;
+    }
+
+    app.set_confirm_popup_index(0);
+    app.set_show_quit_confirm(true);
+    true
+}
+
 /// Requests native activation after Slint has (re)created the HWND. Showing a
 /// tray-hidden Slint window is asynchronous, so callers retry this briefly.
 fn bring_window_to_front(app: &AppWindow) -> bool {
@@ -217,7 +243,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => fatal(&err.to_string(), 2),
     };
 
-    let config = config::load_config();
+    let mut config = config::load_config();
+    let login_startup_was_enabled = config.start_on_login;
+    let settings_were_normalized = config.enforce_setting_dependencies();
 
     // Trainer-specific tray launches carry independent hotkeys and overrides,
     // so only the ordinary normal-mode app is a singleton.
@@ -256,9 +284,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The app is portable, so it may have moved since its login task or
     // registry entry was created. Elevated tasks are repaired only after the
     // startup handoff above, when this process has permission to replace one.
-    if config.start_on_login {
+    if login_startup_was_enabled && !config.start_on_login {
+        if let Err(err) = startup::set_enabled(false, config.run_as_admin) {
+            dialog::warning(&format!("Could not disable Windows login startup: {err}"));
+        }
+    } else if config.start_on_login {
         if let Err(err) = startup::set_enabled(true, config.run_as_admin) {
             dialog::warning(&format!("Could not update Windows login startup: {err}"));
+        }
+    }
+    if settings_were_normalized {
+        if let Err(err) = config::save_config(&config) {
+            dialog::warning(&format!("Could not save the updated settings: {err}"));
         }
     }
 
@@ -285,6 +322,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app_state::wire(&app, config, app_state::AppMode::Windowed);
     let tray = WindowedTrayIcon::new()?;
+    tray.set_active(start_in_background);
     let window_features_started = Rc::new(Cell::new(false));
 
     {
@@ -304,13 +342,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     {
+        let app_weak = app.as_weak();
         let tray_weak = tray.as_weak();
         app.on_run_in_background_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
             let Some(tray) = tray_weak.upgrade() else {
                 return;
             };
-            let result = if enabled { tray.show() } else { tray.hide() };
-            if let Err(err) = result {
+            if let Err(err) = set_windowed_tray_enabled(&app, &tray, enabled) {
                 dialog::error(&format!("Could not update the system tray icon: {err}"));
             }
         });
@@ -319,7 +360,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // run_event_loop_until_quit is deliberate: once minimized, no app window
     // remains visible, but the normal-mode tray and global game-matching
     // hotkey must keep running until Exit is chosen.
-    app.window().on_close_requested(|| {
+    let app_weak = app.as_weak();
+    app.window().on_close_requested(move || {
+        if let Some(app) = app_weak.upgrade() {
+            if request_close_confirmation(&app) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+        }
+
         let _ = slint::quit_event_loop();
         slint::CloseRequestResponse::HideWindow
     });
@@ -380,7 +428,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let outcome = if start_in_background {
-        tray.show()?;
         slint::run_event_loop_until_quit()
     } else {
         match show_windowed_app(&app, &window_features_started) {
@@ -407,7 +454,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opening_settings_does_not_report_a_login_startup_change() {
+    fn settings_dependencies_and_confirmation_are_enforced() {
         let app = create_window().expect("creates window component");
         app.set_start_on_login(true);
         app.set_run_as_admin(true);
@@ -416,10 +463,65 @@ mod tests {
         let observed_count = callback_count.clone();
         app.on_login_startup_changed(move |_, _| {
             observed_count.set(observed_count.get() + 1);
+            true
         });
 
         app.invoke_open_settings_view();
 
         assert_eq!(callback_count.get(), 0);
+
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        app.invoke_request_toggle_start_on_login();
+        assert!(app.get_start_on_login());
+        assert!(app.get_run_in_background());
+
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        app.on_login_startup_changed(|_, _| false);
+
+        app.invoke_request_toggle_start_on_login();
+
+        assert!(!app.get_start_on_login());
+        assert!(!app.get_run_in_background());
+
+        app.invoke_request_toggle_run_in_background();
+        assert!(app.get_run_in_background());
+
+        app.invoke_request_toggle_close_after_launch();
+
+        assert!(app.get_show_close_after_launch_confirm());
+        assert!(!app.get_close_after_launch());
+        assert_eq!(app.get_confirm_popup_index(), 0);
+
+        app.set_show_close_after_launch_confirm(false);
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        let app_weak = app.as_weak();
+        app.on_enable_close_after_launch(move || {
+            app_weak.unwrap().set_close_after_launch(true);
+        });
+
+        app.invoke_request_toggle_close_after_launch();
+
+        assert!(app.get_close_after_launch());
+        assert!(!app.get_show_close_after_launch_confirm());
+
+        let tray = WindowedTrayIcon::new().expect("creates tray component");
+        assert!(!tray.get_active());
+        tray.set_active(true);
+        assert!(tray.get_active());
+        tray.set_active(false);
+        assert!(!tray.get_active());
+
+        app.set_confirm_exit(true);
+        assert!(request_close_confirmation(&app));
+        assert!(app.get_show_quit_confirm());
+        assert_eq!(app.get_confirm_popup_index(), 0);
+
+        app.set_show_quit_confirm(false);
+        app.set_confirm_exit(false);
+        assert!(!request_close_confirmation(&app));
+        assert!(!app.get_show_quit_confirm());
     }
 }
