@@ -975,11 +975,12 @@ export component AppWindow inherits Window {
         if root.close-after-launch {
             return;
         }
-        if root.start-on-login {
-            root.start-on-login = false;
-        } else {
-            root.run-in-background = true;
-            root.start-on-login = true;
+        let enabled = !root.start-on-login;
+        if root.login-startup-changed(enabled, root.run-as-admin) {
+            root.start-on-login = enabled;
+            if enabled {
+                root.run-in-background = true;
+            }
         }
     }
 
@@ -1114,9 +1115,9 @@ export component AppWindow inherits Window {
     // Lets normal windowed startup show or hide its tray icon immediately when
     // the setting changes. CLI launch-option mode does not subscribe to this.
     callback run-in-background-changed(bool);
-    // Applies the Windows login registration. Kept separate from ordinary
-    // config persistence because changing it can fail and must be rolled back.
-    callback login-startup-changed(bool, bool);
+    // Applies the Windows login registration before its UI property changes.
+    // False leaves the current setting untouched.
+    callback login-startup-changed(bool, bool) -> bool;
     // Ends this process and starts an elevated copy in its place; app_state
     // persists the pending settings first, since the new process reads them
     // back off config.json.
@@ -1375,7 +1376,6 @@ export component AppWindow inherits Window {
         root.settings-changed();
         root.run-in-background-changed(root.run-in-background);
     }
-    changed start-on-login => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
     changed run-as-admin => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
     changed default-shortcut-label => { root.settings-changed(); }
 }

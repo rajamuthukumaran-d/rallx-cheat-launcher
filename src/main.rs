@@ -428,7 +428,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let outcome = if start_in_background {
-        tray.show()?;
         slint::run_event_loop_until_quit()
     } else {
         match show_windowed_app(&app, &window_features_started) {
@@ -464,6 +463,7 @@ mod tests {
         let observed_count = callback_count.clone();
         app.on_login_startup_changed(move |_, _| {
             observed_count.set(observed_count.get() + 1);
+            true
         });
 
         app.invoke_open_settings_view();
@@ -475,6 +475,15 @@ mod tests {
         app.invoke_request_toggle_start_on_login();
         assert!(app.get_start_on_login());
         assert!(app.get_run_in_background());
+
+        app.set_start_on_login(false);
+        app.set_run_in_background(false);
+        app.on_login_startup_changed(|_, _| false);
+
+        app.invoke_request_toggle_start_on_login();
+
+        assert!(!app.get_start_on_login());
+        assert!(!app.get_run_in_background());
 
         app.invoke_request_toggle_run_in_background();
         assert!(app.get_run_in_background());
