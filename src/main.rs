@@ -25,6 +25,7 @@ mod key_capture;
 mod keys;
 mod launch_args;
 mod renderer;
+mod single_instance;
 mod startup;
 mod trainer;
 
@@ -183,6 +184,31 @@ fn show_windowed_app(
     Ok(())
 }
 
+/// Requests native activation after Slint has (re)created the HWND. Showing a
+/// tray-hidden Slint window is asynchronous, so callers retry this briefly.
+fn bring_window_to_front(app: &AppWindow) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+
+    let handle = app.window().window_handle();
+    let Ok(handle) = HasWindowHandle::window_handle(&handle) else {
+        return false;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return false;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut std::ffi::c_void);
+
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd).as_bool()
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -192,6 +218,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config = config::load_config();
+
+    // Trainer-specific tray launches carry independent hotkeys and overrides,
+    // so only the ordinary normal-mode app is a singleton.
+    if options.is_none() && single_instance::activate_existing()? {
+        return Ok(());
+    }
 
     // Integrity level is fixed when a process is created, so honoring "run as
     // administrator" means handing the whole startup over to a fresh elevated
@@ -209,6 +241,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )),
         }
     }
+
+    // Claim this before repairing Windows-login registration, which can take
+    // long enough for a rapid second click to reach startup as well.
+    let normal_instance = if options.is_none() {
+        match single_instance::SingleInstance::claim()? {
+            single_instance::Claim::Primary(instance) => Some(instance),
+            single_instance::Claim::Existing => return Ok(()),
+        }
+    } else {
+        None
+    };
 
     // The app is portable, so it may have moved since its login task or
     // registry entry was created. Elevated tasks are repaired only after the
@@ -231,6 +274,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+
+    let Some(instance) = normal_instance else {
+        unreachable!("normal mode claimed its single-instance lock")
+    };
+    let instance = Rc::new(instance);
 
     let start_in_background = config.run_in_background;
     let app = create_window()?;
@@ -297,6 +345,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let activation_timer = slint::Timer::default();
+    {
+        let app_weak = app.as_weak();
+        let window_features_started = window_features_started.clone();
+        let instance = instance.clone();
+        let activation_retries = Rc::new(Cell::new(0u8));
+        let retries = activation_retries.clone();
+        activation_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(50),
+            move || {
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+
+                if instance.activation_requested() {
+                    if let Err(err) = show_windowed_app(&app, &window_features_started) {
+                        dialog::error(&format!("Could not show Rallx: {err}"));
+                        return;
+                    }
+                    retries.set(20);
+                }
+
+                if retries.get() > 0 {
+                    if bring_window_to_front(&app) {
+                        retries.set(0);
+                    } else {
+                        retries.set(retries.get() - 1);
+                    }
+                }
+            },
+        );
+    }
+
     let outcome = if start_in_background {
         tray.show()?;
         slint::run_event_loop_until_quit()
@@ -307,9 +389,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let _ = app.hide();
+    drop(activation_timer);
     drop(minimize_timer);
     drop(tray);
     drop(app);
+    drop(instance);
 
     elevate::finish_requested_restart();
 
