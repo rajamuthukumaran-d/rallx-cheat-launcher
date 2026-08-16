@@ -56,8 +56,9 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Functionality,
 - List all the trainer in a selected folder
-- Clicking on the list or the play button or pressing A from gamepad launches
-  or reuses the trainer, waits for a fresh trainer to become ready, and then
+- Clicking a trainer row opens its Edit popup. Clicking the row's play button
+  or pressing A from gamepad launches or reuses the trainer, waits for a fresh
+  trainer to become ready, and then
   injects its saved default cheats without minimizing it. The normal-mode
   global shortcut uses the same workflow but minimizes a freshly launched
   trainer after injection when default cheats exist. Repeated shortcut presses

@@ -278,6 +278,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     callback remove-cheat(int);
     callback cheat-label-changed(int, string);
     callback record-cheat(int);
+    callback launch();
     callback copy-script();
     callback cancel();
     callback save();
@@ -318,6 +319,17 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     }
 
                     Rectangle { horizontal-stretch: 1; }
+
+                    if root.edit-mode: IconButton {
+                        icon: @image-url("../../assets/images/icons/play.svg");
+                        icon-size: 16px;
+                        button-size: 34px;
+                        bordered: false;
+                        button-bg: Theme.accent;
+                        icon-color: Theme.on-accent;
+                        tooltip-text: "Launch trainer";
+                        clicked => { root.launch(); }
+                    }
 
                     if root.edit-mode: IconButton {
                         icon: @image-url("../../assets/images/icons/copy.svg");
