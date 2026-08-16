@@ -280,6 +280,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     callback record-cheat(int);
     callback launch();
     callback copy-script();
+    callback delete();
     callback cancel();
     callback save();
 
@@ -339,6 +340,16 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         icon-color: Theme.text-dim;
                         tooltip-text: "Copy launch script";
                         clicked => { root.copy-script(); }
+                    }
+
+                    if root.edit-mode: IconButton {
+                        icon: @image-url("../../assets/images/icons/delete.svg");
+                        icon-size: 16px;
+                        button-size: 34px;
+                        bordered: false;
+                        icon-color: Theme.danger;
+                        tooltip-text: "Delete trainer";
+                        clicked => { root.delete(); }
                     }
 
                     IconButton {

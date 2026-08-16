@@ -40,6 +40,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Add/Edit trainer popup:
 - This is a popup when a trainer is dragged into the app or pressed add icon from the home
+- When editing, its header can launch the trainer, copy its launch script, or
+  delete it after confirmation.
 - Show the selected trainer information and allow user to modify Name
 - An option to choose game exe
 - An optional executable to watch. After that app has been seen running and

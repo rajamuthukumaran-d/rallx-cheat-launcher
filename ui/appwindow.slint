@@ -76,6 +76,7 @@ export component AppWindow inherits Window {
 
     in-out property <int> delete-confirm-id: -1;
     in-out property <string> delete-confirm-name: "";
+    private property <bool> delete-from-edit-modal: false;
 
     in-out property <bool> show-add-edit: false;
     in-out property <int> editing-id: -1;
@@ -871,11 +872,25 @@ export component AppWindow inherits Window {
 
     function close-delete-confirm(confirmed: bool) {
         if confirmed {
+            root.delete-from-edit-modal = false;
             root.confirm-delete(root.delete-confirm-id);
         } else {
             root.delete-confirm-id = -1;
+            if root.delete-from-edit-modal {
+                root.show-add-edit = true;
+                root.delete-from-edit-modal = false;
+            }
         }
         root.confirm-popup-index = 1;
+    }
+
+    function request-form-delete() {
+        if root.editing-id < 0 {
+            return;
+        }
+        root.delete-from-edit-modal = true;
+        root.show-add-edit = false;
+        root.request-delete(root.editing-id);
     }
 
     function close-quit-confirm(confirmed: bool) {
@@ -1178,6 +1193,7 @@ export component AppWindow inherits Window {
             record-cheat(id) => { root.start-cheat-recording(id); }
             launch => { root.launch-trainer(root.editing-id); }
             copy-script => { root.copy-script(root.editing-id); }
+            delete => { root.request-form-delete(); }
             cancel => { root.cancel-form(); }
             save => { root.save-form(); }
         }
