@@ -110,7 +110,7 @@ export component AppWindow inherits Window {
     // Whether the form's Game section is expanded. Opened automatically when
     // the trainer being edited already has a game configured.
     in-out property <bool> form-game-expanded: false;
-    // Gamepad focus target spanning the whole add/edit form: 0 Name,
+    // Keyboard/gamepad focus target spanning the whole add/edit form: 0 Name,
     // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
     // launch options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Auto
     // trigger, 9 Delay, 10 Add cheat, one stop per cheat row, then Cancel/Save
@@ -123,6 +123,10 @@ export component AppWindow inherits Window {
     // a cheat row's label/record/remove, or the final Cancel/Save row). Reset
     // to 0 on every row change.
     in-out property <int> form-sub-index: 0;
+    // Header actions are outside the scrollable form rows. Left/right moves
+    // within this row; up/down enters or leaves it.
+    in-out property <bool> form-header-focused: false;
+    in-out property <int> form-header-index: 0;
 
     in-out property <bool> recording: false;
     in-out property <string> recording-target: "";
@@ -254,6 +258,10 @@ export component AppWindow inherits Window {
         return 12 + root.form-cheats.length;
     }
 
+    function form-header-item-count() -> int {
+        return root.editing-id >= 0 ? 4 : 1;
+    }
+
     // The trainer-executable row (index 1) is only rendered when adding, so
     // editing keeps every other index the same and steps over that one stop
     // instead of renumbering the whole form.
@@ -274,8 +282,27 @@ export component AppWindow inherits Window {
     }
 
     function move-form-selection(delta: int) {
+        key-scope.focus();
+        if root.form-header-focused {
+            if delta > 0 {
+                root.form-header-focused = false;
+                root.form-focused-index = 0;
+                root.form-sub-index = 0;
+            }
+            return;
+        }
         if root.form-focused-index < 0 {
-            root.form-focused-index = 0;
+            if delta < 0 {
+                root.form-header-focused = true;
+                root.form-header-index = 0;
+            } else {
+                root.form-focused-index = 0;
+            }
+        } else if delta < 0 && root.form-focused-index == 0 {
+            root.form-header-focused = true;
+            root.form-header-index = 0;
+            root.form-sub-index = 0;
+            return;
         } else {
             root.form-focused-index = max(0, min(root.form-focused-index + delta, root.form-item-count() - 1));
         }
@@ -343,10 +370,22 @@ export component AppWindow inherits Window {
     }
 
     function move-form-sub-selection(delta: int) {
+        key-scope.focus();
+        if root.form-header-focused {
+            root.form-header-index = max(0, min(root.form-header-index + delta, root.form-header-item-count() - 1));
+            return;
+        }
         if root.form-focused-index < 0 {
             return;
         }
         root.form-sub-index = max(0, min(root.form-sub-index + delta, root.form-sub-count() - 1));
+    }
+
+    function move-form-from(index: int, delta: int) {
+        root.form-header-focused = false;
+        root.form-focused-index = index;
+        root.form-sub-index = 0;
+        root.move-form-selection(delta);
     }
 
     // Home screen header has 4 stops: Search, Refresh, Add, Settings.
@@ -426,6 +465,7 @@ export component AppWindow inherits Window {
             root.move-settings-selection(delta);
             return;
         }
+        key-scope.focus();
         // Home screen: header <-> trainer list <-> (when the list is empty)
         // the single empty-state action button. Up from the first row moves
         // into the header; Down from the header returns to wherever the list
@@ -545,6 +585,13 @@ export component AppWindow inherits Window {
         root.home-header-index = 0;
         root.empty-action-focused = false;
         root.search-focus-sequence += 1;
+    }
+
+    function move-from-search(delta: int) {
+        root.home-header-focused = true;
+        root.home-header-index = 0;
+        root.empty-action-focused = false;
+        root.move-selection(delta);
     }
 
     // Y: the dedicated "start typing into search" shortcut - opens the
@@ -765,6 +812,8 @@ export component AppWindow inherits Window {
         root.show-add-edit = false;
         root.form-focused-index = -1;
         root.form-sub-index = 0;
+        root.form-header-focused = false;
+        root.form-header-index = 0;
     }
 
     // Maps form-focused-index (and, for the cheat rows and the final
@@ -775,7 +824,19 @@ export component AppWindow inherits Window {
     // even while this form is open, so a physical Return on the Name/label
     // field must not pop up the on-screen keyboard on top of it.
     function activate-form-focused(via-gamepad: bool) {
-        if root.form-focused-index == 0 {
+        if root.form-header-focused {
+            if root.editing-id < 0 {
+                root.cancel-form();
+            } else if root.form-header-index == 0 {
+                root.launch-trainer(root.editing-id);
+            } else if root.form-header-index == 1 {
+                root.copy-script(root.editing-id);
+            } else if root.form-header-index == 2 {
+                root.request-form-delete();
+            } else {
+                root.cancel-form();
+            }
+        } else if root.form-focused-index == 0 {
             if via-gamepad {
                 root.open-keyboard("name", -1, root.form-name);
             }
@@ -1112,6 +1173,7 @@ export component AppWindow inherits Window {
             launch-trainer(id) => { root.launch-trainer(id); }
             edit-trainer(id) => { root.open-edit(id); }
             search-changed(q) => { root.search-changed(q); }
+            navigate-from-search(delta) => { root.move-from-search(delta); }
         }
 
         if root.view == AppView.settings: SettingsScreen {
@@ -1169,6 +1231,8 @@ export component AppWindow inherits Window {
             game-expanded: root.form-game-expanded;
             can-generate-bat: root.form-can-generate-bat();
             edit-mode: root.editing-id >= 0;
+            header-focused: root.form-header-focused;
+            header-index: root.form-header-index;
             focused-index: root.form-focused-index;
             sub-index: root.form-sub-index;
 
@@ -1186,6 +1250,7 @@ export component AppWindow inherits Window {
             remove-cheat(id) => { root.remove-cheat-row(id); }
             cheat-label-changed(id, v) => { root.set-cheat-label(id, v); }
             record-cheat(id) => { root.start-cheat-recording(id); }
+            navigate-from(index, delta) => { root.move-form-from(index, delta); }
             launch => { root.launch-trainer(root.editing-id); }
             copy-script => { root.copy-script(root.editing-id); }
             delete => { root.request-form-delete(); }
@@ -1226,6 +1291,13 @@ export component AppWindow inherits Window {
     // search box and add/edit text fields auto-focus themselves; the key
     // recorder grabs focus to capture a combo), so keyboard nav resumes.
     changed show-search => { if (!root.show-search) { key-scope.focus(); } }
+    changed home-header-focused => {
+        if (!root.home-header-focused && root.view == AppView.home && !root.popup-open()) {
+            key-scope.focus();
+        }
+    }
+    changed form-focused-index => { if (root.show-add-edit) { key-scope.focus(); } }
+    changed form-header-focused => { if (root.show-add-edit) { key-scope.focus(); } }
     changed recording => { if (!root.recording) { key-scope.focus(); } }
     changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
     changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }

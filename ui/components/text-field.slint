@@ -9,11 +9,12 @@ export component TextField inherits Rectangle {
     in property <length> field-font-size: 16px;
     in property <length> pad-h: 14px;
     in property <bool> read-only: false;
-    // Gamepad-focus indicator: tints the placeholder/typed text instead of
+    // Keyboard/gamepad focus indicator: tints the placeholder/typed text instead of
     // drawing a focus ring around the field.
     in property <bool> highlighted: false;
     callback edited();
     callback accepted();
+    callback navigate-vertical(int);
 
     height: 44px;
     background: Theme.panel2;
@@ -48,5 +49,16 @@ export component TextField inherits Rectangle {
         read-only: root.read-only;
         edited => { root.edited(); }
         accepted => { root.accepted(); }
+        key-pressed(event) => {
+            if event.text == Key.DownArrow {
+                root.navigate-vertical(1);
+                accept
+            } else if event.text == Key.UpArrow {
+                root.navigate-vertical(-1);
+                accept
+            } else {
+                reject
+            }
+        }
     }
 }

@@ -35,6 +35,7 @@ export component HomeScreen inherits Rectangle {
     callback launch-trainer(int);
     callback edit-trainer(int);
     callback search-changed(string);
+    callback navigate-from-search(int);
 
     background: Theme.bg;
 
@@ -115,6 +116,17 @@ export component HomeScreen inherits Rectangle {
                                 edited => { root.search-changed(self.text); }
                                 init => { self.focus(); }
                                 changed focus-sequence => { self.focus(); }
+                                key-pressed(event) => {
+                                    if event.text == Key.DownArrow {
+                                        root.navigate-from-search(1);
+                                        accept
+                                    } else if event.text == Key.UpArrow {
+                                        root.navigate-from-search(-1);
+                                        accept
+                                    } else {
+                                        reject
+                                    }
+                                }
                             }
 
                             IconButton {
