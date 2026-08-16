@@ -32,7 +32,10 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 - "Start on login" option (off by default). When enabled, Windows starts the
   normal app automatically after the current user signs in. The "Run in
   background" setting independently controls whether that automatic start is
-  hidden in the system tray or opens the main window.
+  hidden in the system tray or opens the main window. When "Run as
+  administrator" is also enabled, use a highest-privilege Windows logon task
+  so subsequent automatic starts do not show a UAC prompt. Delay that task
+  briefly until Explorer's notification area is ready.
 - Confirm before closing the app is on by default.
 - Option to run as administrator, plus a button to restart into it right away
     - Run as administrator is on by default.

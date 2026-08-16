@@ -1072,7 +1072,7 @@ export component AppWindow inherits Window {
     callback run-in-background-changed(bool);
     // Applies the Windows login registration. Kept separate from ordinary
     // config persistence because changing it can fail and must be rolled back.
-    callback start-on-login-changed(bool);
+    callback login-startup-changed(bool, bool);
     // Ends this process and starts an elevated copy in its place; app_state
     // persists the pending settings first, since the new process reads them
     // back off config.json.
@@ -1319,7 +1319,7 @@ export component AppWindow inherits Window {
         root.settings-changed();
         root.run-in-background-changed(root.run-in-background);
     }
-    changed start-on-login => { root.start-on-login-changed(root.start-on-login); }
-    changed run-as-admin => { root.settings-changed(); }
+    changed start-on-login => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
+    changed run-as-admin => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
     changed default-shortcut-label => { root.settings-changed(); }
 }
