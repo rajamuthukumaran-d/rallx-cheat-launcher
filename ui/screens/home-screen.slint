@@ -352,7 +352,28 @@ export component HomeScreen inherits Rectangle {
                     padding-top: 14px;
                     padding-bottom: 24px;
 
-                    ListView {
+                    trainer-list := ListView {
+                        private property <int> navigation-index: root.focused-index;
+                        private property <bool> navigation-in-header: root.header-focused;
+
+                        function bring-focused-row-into-view() {
+                            if self.visible-height <= 0px || root.header-focused || root.focused-index < 0 || root.focused-index >= root.visible-trainers.length {
+                                return;
+                            }
+
+                            let row-height = Theme.row-icon-size + Theme.row-padding-v * 2 + Theme.row-gap;
+                            let row-y = self.viewport-y + root.focused-index * row-height;
+                            if row-y < 0px {
+                                self.viewport-y -= row-y;
+                            } else if row-y + row-height > self.visible-height {
+                                self.viewport-y -= row-y + row-height - self.visible-height;
+                            }
+                        }
+
+                        changed navigation-index => { self.bring-focused-row-into-view(); }
+                        changed navigation-in-header => { self.bring-focused-row-into-view(); }
+                        changed visible-height => { self.bring-focused-row-into-view(); }
+
                         for t[i] in root.visible-trainers: TrainerRow {
                             trainer: t;
                             edit-mode: root.edit-mode;
