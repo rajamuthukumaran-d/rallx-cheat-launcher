@@ -9,6 +9,7 @@ export component HomeScreen inherits Rectangle {
     in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
+    in property <int> search-focus-sequence: 0;
     in-out property <int> focused-index: -1;
     // Gamepad/keyboard focus on the header row (Search, Refresh, Edit, Add,
     // Settings) instead of the trainer list. header-index 0..4 selects which
@@ -106,6 +107,7 @@ export component HomeScreen inherits Rectangle {
                             }
 
                             TextInput {
+                                private property <int> focus-sequence: root.search-focus-sequence;
                                 horizontal-stretch: 1;
                                 vertical-alignment: center;
                                 single-line: true;
@@ -114,6 +116,7 @@ export component HomeScreen inherits Rectangle {
                                 font-size: 17px;
                                 edited => { root.search-changed(self.text); }
                                 init => { self.focus(); }
+                                changed focus-sequence => { self.focus(); }
                             }
 
                             IconButton {

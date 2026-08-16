@@ -55,6 +55,7 @@ export component AppWindow inherits Window {
     // screen's header row (Search/Refresh/Edit/Add/Settings).
     in-out property <bool> home-header-focused: false;
     in-out property <int> home-header-index: 0;
+    private property <int> search-focus-sequence: 0;
     // True when the trainer list is empty and gamepad/keyboard focus is on
     // the single action button shown in its place ("Add trainer" or, when a
     // search is filtering everything out, "Clear search").
@@ -498,6 +499,14 @@ export component AppWindow inherits Window {
         }
     }
 
+    function home-trainer-focused() -> bool {
+        return root.view == AppView.home
+            && !root.home-header-focused
+            && !root.empty-action-focused
+            && root.focused-index >= 0
+            && root.focused-index < root.visible-trainers.length;
+    }
+
     public function delete-focused-trainer() {
         if root.popup-open() || root.view != AppView.home {
             return;
@@ -525,6 +534,17 @@ export component AppWindow inherits Window {
             root.search-query = "";
             root.search-changed("");
         }
+    }
+
+    function open-search-shortcut() {
+        if root.popup-open() || root.view != AppView.home {
+            return;
+        }
+        root.show-search = true;
+        root.home-header-focused = true;
+        root.home-header-index = 0;
+        root.empty-action-focused = false;
+        root.search-focus-sequence += 1;
     }
 
     // Y: the dedicated "start typing into search" shortcut - opens the
@@ -991,11 +1011,10 @@ export component AppWindow inherits Window {
         triggered => { root.show-toast = false; }
     }
 
-    // Global keyboard navigation, mirroring the gamepad one-for-one. This
-    // FocusScope wraps the whole UI and holds focus for the app, translating
-    // keys into the exact same functions gamepad.rs invokes: arrows ->
-    // move-selection/move-horizontal, Enter = A (gamepad-accept), Esc = B
-    // (gamepad-cancel). Wrapping (rather than sitting beside) the content
+    // Global keyboard navigation and application shortcuts. This FocusScope
+    // wraps the whole UI and holds focus for the app, translating arrows,
+    // Enter, and Esc into the same functions gamepad.rs invokes. Wrapping
+    // (rather than sitting beside) the content
     // matters: text inputs and the key recorder steal focus while active, but
     // being their ancestor, this scope still receives the keys they don't
     // consume (arrows, Enter, Esc) so navigation keeps working even while
@@ -1008,7 +1027,35 @@ export component AppWindow inherits Window {
         init => { self.focus(); }
 
         key-pressed(event) => {
-            if (event.text == Key.DownArrow) {
+            if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && (event.text == "f" || event.text == "F")) {
+                root.open-search-shortcut();
+                accept
+            } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && event.text == ",") {
+                root.open-settings-view();
+                accept
+            } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && (event.text == "r" || event.text == "R")) {
+                if (!root.popup-open() && root.view == AppView.home) {
+                    root.refresh-trainers();
+                }
+                accept
+            } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && (event.text == "n" || event.text == "N")) {
+                if (!root.popup-open() && root.view == AppView.home) {
+                    root.request-add();
+                }
+                accept
+            } else if (!event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && (event.text == "i" || event.text == "I") && root.home-trainer-focused()) {
+                root.edit-focused-trainer();
+                accept
+            } else if (!event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && !event.modifiers.meta
+                && event.text == Key.Delete && root.home-trainer-focused()) {
+                root.delete-focused-trainer();
+                accept
+            } else if (event.text == Key.DownArrow) {
                 root.move-selection(1);
                 accept
             } else if (event.text == Key.UpArrow) {
@@ -1037,6 +1084,7 @@ export component AppWindow inherits Window {
             edit-mode <=> root.edit-mode;
             show-search <=> root.show-search;
             search-query <=> root.search-query;
+            search-focus-sequence: root.search-focus-sequence;
             focused-index <=> root.focused-index;
             header-focused: root.home-header-focused;
             header-index: root.home-header-index;
