@@ -5,16 +5,58 @@ import { TrainerRow } from "../components/trainer-row.slint";
 import { GamepadHintBar } from "../components/gamepad-hint-bar.slint";
 import { ListView } from "std-widgets.slint";
 
+component WindowAction inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 44px;
+    background: selected ? Theme.panel2 : transparent;
+    border-radius: 7px;
+    accessible-role: button;
+    accessible-label: label;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        cross-axis-alignment: center;
+
+        Image {
+            source: root.icon;
+            width: 18px;
+            height: 18px;
+            colorize: root.selected ? Theme.accent : Theme.text-dim;
+        }
+
+        Text {
+            text: root.label;
+            color: root.selected ? Theme.accent : Theme.text;
+            font-size: 15px;
+            font-weight: root.selected ? 700 : 600;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
 export component HomeScreen inherits Rectangle {
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
     in property <int> search-focus-sequence: 0;
     in-out property <int> focused-index: -1;
     // Gamepad/keyboard focus on the header row (Search, Refresh, Add,
-    // Settings) instead of the trainer list. header-index 0..3 selects which
-    // button; driven by AppWindow's move-selection/move-horizontal.
+    // Settings, and fullscreen window actions) instead of the trainer list.
+    // Driven by AppWindow's move-selection/move-horizontal.
     in property <bool> header-focused: false;
     in property <int> header-index: 0;
+    in property <bool> fullscreen-active: false;
+    in property <bool> show-window-menu: false;
+    in property <int> window-menu-index: 0;
     // Gamepad/keyboard focus on the empty-state action button ("Select
     // folder", "Add trainer" or "Clear search") when the trainer list is
     // empty.
@@ -31,6 +73,10 @@ export component HomeScreen inherits Rectangle {
     callback open-add();
     callback select-folder();
     callback open-settings();
+    callback open-window-menu();
+    callback close-window-menu();
+    callback minimize-window();
+    callback close-window();
     callback refresh();
     callback launch-trainer(int);
     callback edit-trainer(int);
@@ -182,6 +228,15 @@ export component HomeScreen inherits Rectangle {
                         icon-color: root.header-hl(3) ? Theme.accent : Theme.text;
                         tooltip-text: "Settings";
                         clicked => { root.open-settings(); }
+                    }
+
+                    if root.fullscreen-active: IconButton {
+                        icon: @image-url("../../assets/images/icons/exit.svg");
+                        icon-size: root.header-hl(4) ? 22px : 19px;
+                        button-size: 40px;
+                        icon-color: root.header-hl(4) ? Theme.accent : Theme.text;
+                        tooltip-text: "Window actions";
+                        clicked => { root.open-window-menu(); }
                     }
                 }
             }
@@ -390,6 +445,46 @@ export component HomeScreen inherits Rectangle {
             GamepadHintBar {
                 trainer-count: root.trainer-count;
                 total-size-label: root.total-size-label;
+            }
+        }
+
+        if root.show-window-menu: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+
+            TouchArea {
+                clicked => { root.close-window-menu(); }
+            }
+
+            Rectangle {
+                x: parent.width - self.width - 28px;
+                y: 66px;
+                width: 190px;
+                height: window-actions.min-height;
+                background: Theme.panel;
+                border-width: 1px;
+                border-color: Theme.border;
+                border-radius: 10px;
+
+                window-actions := VerticalLayout {
+                    padding: 7px;
+                    spacing: 3px;
+
+                    WindowAction {
+                        icon: @image-url("../../assets/images/icons/minimize.svg");
+                        label: "Minimize";
+                        selected: root.window-menu-index == 0;
+                        clicked => { root.minimize-window(); }
+                    }
+
+                    WindowAction {
+                        icon: @image-url("../../assets/images/icons/close.svg");
+                        label: "Close";
+                        selected: root.window-menu-index == 1;
+                        clicked => { root.close-window(); }
+                    }
+                }
             }
         }
     }

@@ -8,8 +8,9 @@
 // up/down moves the focused row (home), focused control (settings), or
 // focused field/button (add/edit form). D-Pad left/right cycles the value of
 // the focused settings control (accent color, background, row style) in
-// place, or moves between the fields/buttons within the add/edit form's
-// focused row. X (West) edits, Y (North) opens/starts typing into search,
+// place, selects a fullscreen window-menu action, or moves between the
+// fields/buttons within the add/edit form's focused row. X (West) edits, Y
+// (North) opens/starts typing into search,
 // Select deletes (with confirm), RB (RightTrigger) copies the launch script,
 // and Start opens settings — mirroring the home screen's gamepad hint bar.
 // While the virtual keyboard is open, X/Y are repurposed to backspace/space,

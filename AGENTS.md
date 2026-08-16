@@ -119,10 +119,13 @@ silently violate a requirement from another section.)
   clicking a row opens Edit while only its play icon launches; search, refresh,
   add, and settings icons at top; full gamepad mapping (A=launch, X=edit,
   Y=search, Select=delete w/ confirm, RB=copy launch script, Start=settings);
-  "close after launching" checkbox.
+  "close after launching" checkbox. When the normal app launched fullscreen,
+  an exit icon beside Settings opens Minimize and Close actions; Close respects
+  the confirm-before-closing setting.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
-  (accent/background/style), an off-by-default option to launch the normal app
-  in borderless fullscreen mode without a title bar, global "close app after
+  (accent/background/style), an off-by-default option to show the normal app
+  in borderless fullscreen mode without a title bar immediately and on its
+  next launch, global "close app after
   launching trainer",
   normal-mode "run in background" (start hidden in the tray and minimize to
   tray while retaining the global running-game hotkey; this remains normal
