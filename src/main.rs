@@ -184,6 +184,22 @@ fn show_windowed_app(
     Ok(())
 }
 
+fn set_windowed_tray_enabled(
+    app: &AppWindow,
+    tray: &WindowedTrayIcon,
+    enabled: bool,
+) -> Result<(), slint::PlatformError> {
+    if !enabled {
+        // A visible SystemTrayIcon participates in Slint's event-loop
+        // keepalive, so establish the foreground window's lifetime before
+        // releasing the icon.
+        app.window().set_minimized(false);
+        app.show()?;
+    }
+    tray.set_active(enabled);
+    Ok(())
+}
+
 /// Requests native activation after Slint has (re)created the HWND. Showing a
 /// tray-hidden Slint window is asynchronous, so callers retry this briefly.
 fn bring_window_to_front(app: &AppWindow) -> bool {
@@ -296,6 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app_state::wire(&app, config, app_state::AppMode::Windowed);
     let tray = WindowedTrayIcon::new()?;
+    tray.set_active(start_in_background);
     let window_features_started = Rc::new(Cell::new(false));
 
     {
@@ -315,13 +332,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     {
+        let app_weak = app.as_weak();
         let tray_weak = tray.as_weak();
         app.on_run_in_background_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
             let Some(tray) = tray_weak.upgrade() else {
                 return;
             };
-            let result = if enabled { tray.show() } else { tray.hide() };
-            if let Err(err) = result {
+            if let Err(err) = set_windowed_tray_enabled(&app, &tray, enabled) {
                 dialog::error(&format!("Could not update the system tray icon: {err}"));
             }
         });
@@ -460,5 +480,12 @@ mod tests {
 
         assert!(app.get_close_after_launch());
         assert!(!app.get_show_close_after_launch_confirm());
+
+        let tray = WindowedTrayIcon::new().expect("creates tray component");
+        assert!(!tray.get_active());
+        tray.set_active(true);
+        assert!(tray.get_active());
+        tray.set_active(false);
+        assert!(!tray.get_active());
     }
 }

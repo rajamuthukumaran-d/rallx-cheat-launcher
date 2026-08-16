@@ -37,8 +37,11 @@ export component TrayIcon inherits SystemTrayIcon {
 // the running game dynamically. Keep its tray menu separate from launch-option
 // mode so the two background behaviors cannot accidentally share actions.
 export component WindowedTrayIcon inherits SystemTrayIcon {
+    in-out property <bool> active: false;
+
     icon: @image-url("../assets/images/logo/logo-icon.png");
     tooltip: "Rallx Cheat Launcher";
+    visible: root.active;
 
     callback show-window();
     callback quit-app();
