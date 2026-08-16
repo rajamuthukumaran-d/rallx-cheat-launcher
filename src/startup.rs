@@ -10,17 +10,26 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, WIN32_ERROR,
+};
+use windows::Win32::Security::{EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
 use windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteValueW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE,
     REG_OPTION_NON_VOLATILE, REG_SZ,
 };
-use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, CREATE_NO_WINDOW,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "Rallx Cheat Launcher";
 const TASK_NAME: &str = "Rallx Cheat Launcher";
 const TASK_DELAY: &str = "0000:15";
+const HRESULT_FILE_NOT_FOUND: i32 = 0x8007_0002u32 as i32;
+const HRESULT_PATH_NOT_FOUND: i32 = 0x8007_0003u32 as i32;
 
 #[derive(Debug, PartialEq, Eq)]
 enum LoginRegistration {
@@ -30,6 +39,16 @@ enum LoginRegistration {
 }
 
 struct RegistryKey(HKEY);
+
+struct OwnedHandle(HANDLE);
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
 
 impl Drop for RegistryKey {
     fn drop(&mut self) {
@@ -46,10 +65,12 @@ pub fn set_enabled(enabled: bool, run_as_admin: bool) -> io::Result<()> {
     match registration_for(enabled, run_as_admin) {
         LoginRegistration::Disabled => remove_all(),
         LoginRegistration::Registry => {
+            ensure_process_matches_interactive_user()?;
             enable_registry_startup()?;
             delete_elevated_task()
         }
         LoginRegistration::ElevatedTask => {
+            ensure_process_matches_interactive_user()?;
             create_elevated_task()?;
             disable_registry_startup()
         }
@@ -132,8 +153,36 @@ fn elevated_task_exists() -> io::Result<bool> {
         OsStr::new("/Query"),
         OsStr::new("/TN"),
         OsStr::new(TASK_NAME),
+        OsStr::new("/HRESULT"),
     ])?;
-    Ok(output.status.success())
+    match classify_task_query(output.status.success(), output.status.code()) {
+        TaskQueryResult::Exists => Ok(true),
+        TaskQueryResult::Missing => Ok(false),
+        TaskQueryResult::Failed => {
+            output_result("query the elevated login task", output)?;
+            unreachable!("a successful task query was classified as failed")
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TaskQueryResult {
+    Exists,
+    Missing,
+    Failed,
+}
+
+fn classify_task_query(success: bool, exit_code: Option<i32>) -> TaskQueryResult {
+    if success {
+        TaskQueryResult::Exists
+    } else if matches!(
+        exit_code,
+        Some(HRESULT_FILE_NOT_FOUND | HRESULT_PATH_NOT_FOUND)
+    ) {
+        TaskQueryResult::Missing
+    } else {
+        TaskQueryResult::Failed
+    }
 }
 
 fn remove_all() -> io::Result<()> {
@@ -177,6 +226,75 @@ fn output_result(operation: &str, output: Output) -> io::Result<()> {
         format!("could not {operation}: {detail}")
     };
     Err(io::Error::other(message))
+}
+
+fn ensure_process_matches_interactive_user() -> io::Result<()> {
+    let shell_window = unsafe { GetShellWindow() };
+    if shell_window.0.is_null() {
+        return Err(io::Error::other(
+            "could not identify the signed-in Windows user because Explorer is not ready",
+        ));
+    }
+
+    let mut shell_process_id = 0;
+    unsafe { GetWindowThreadProcessId(shell_window, Some(&mut shell_process_id)) };
+    if shell_process_id == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let shell_process = OwnedHandle(
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, shell_process_id) }
+            .map_err(|err| io::Error::other(err.to_string()))?,
+    );
+    let current_user = process_user_token(unsafe { GetCurrentProcess() })?;
+    let interactive_user = process_user_token(shell_process.0)?;
+
+    let same_user = unsafe {
+        EqualSid(
+            token_user_sid(&current_user),
+            token_user_sid(&interactive_user),
+        )
+        .is_ok()
+    };
+    if same_user {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Windows login startup cannot be configured while Rallx is using administrator credentials for a different account; sign in with an administrator account or turn off Run as administrator",
+        ))
+    }
+}
+
+fn process_user_token(process: HANDLE) -> io::Result<Vec<usize>> {
+    let mut token = HANDLE::default();
+    unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) }
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    let token = OwnedHandle(token);
+
+    let mut byte_count = 0;
+    let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut byte_count) };
+    if byte_count == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let word_count = (byte_count as usize).div_ceil(std::mem::size_of::<usize>());
+    let mut buffer = vec![0usize; word_count];
+    unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            Some(buffer.as_mut_ptr().cast()),
+            byte_count,
+            &mut byte_count,
+        )
+    }
+    .map_err(|err| io::Error::other(err.to_string()))?;
+    Ok(buffer)
+}
+
+fn token_user_sid(buffer: &[usize]) -> windows::Win32::Security::PSID {
+    unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid }
 }
 
 fn open_run_key() -> io::Result<RegistryKey> {
@@ -254,5 +372,23 @@ mod tests {
         );
         assert_eq!(registration_for(true, false), LoginRegistration::Registry);
         assert_eq!(registration_for(false, true), LoginRegistration::Disabled);
+    }
+
+    #[test]
+    fn task_query_ignores_only_not_found_hresult_values() {
+        assert_eq!(
+            classify_task_query(false, Some(HRESULT_FILE_NOT_FOUND)),
+            TaskQueryResult::Missing
+        );
+        assert_eq!(
+            classify_task_query(false, Some(HRESULT_PATH_NOT_FOUND)),
+            TaskQueryResult::Missing
+        );
+        assert_eq!(
+            classify_task_query(false, Some(0x8007_0005u32 as i32)),
+            TaskQueryResult::Failed
+        );
+        assert_eq!(classify_task_query(false, None), TaskQueryResult::Failed);
+        assert_eq!(classify_task_query(true, Some(0)), TaskQueryResult::Exists);
     }
 }
