@@ -218,18 +218,23 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     in property <bool> game-expanded: false;
     in property <bool> can-generate-bat: false;
     in property <bool> edit-mode: false;
+    // The header is a separate navigation row because its actions sit outside
+    // the scrollable form. In edit mode: 0 Launch, 1 Copy, 2 Delete, 3 Close;
+    // in add mode the only stop is Close at index 0.
+    in property <bool> header-focused: false;
+    in property <int> header-index: 0;
     // The trainer executable is only pickable when adding - an existing
     // trainer's exe is the file it was imported as, so editing hides the
     // field rather than offering a swap. Focus indices below stay unchanged
     // either way; AppWindow's move-form-selection skips index 1 when hidden.
     in property <bool> show-exe-field: true;
-    // Gamepad focus target spanning the whole form: 0 Name, 1 Trainer
+    // Keyboard/gamepad focus target spanning the whole form: 0 Name, 1 Trainer
     // executable, 2 Game section header, 3 Game executable, 4 Game launch
     // options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Auto trigger,
     // 9 Delay, 10 Add cheat, one stop per cheat row, then the Cancel/Save row
     // last. Delay is skipped when auto trigger is disabled. -1 means nothing focused. Driven by
-    // AppWindow's move-form-selection/activate-form-focused via D-Pad up/down
-    // and A; 3-6 are skipped while the Game section is collapsed.
+    // AppWindow's move-form-selection/activate-form-focused via Up/Down and
+    // Enter or D-Pad up/down and A; 3-6 are skipped while the Game section is collapsed.
     in property <int> focused-index: -1;
     // Left/right position within the focused row (cheat row: 0 label,
     // 1 record key, 2 remove; Cancel/Save row: 0 Cancel, 1 Save). Driven by
@@ -278,7 +283,10 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     callback remove-cheat(int);
     callback cheat-label-changed(int, string);
     callback record-cheat(int);
+    callback navigate-from(int, int);
+    callback launch();
     callback copy-script();
+    callback delete();
     callback cancel();
     callback save();
 
@@ -320,21 +328,46 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                     Rectangle { horizontal-stretch: 1; }
 
                     if root.edit-mode: IconButton {
+                        icon: @image-url("../../assets/images/icons/play.svg");
+                        icon-size: 16px;
+                        button-size: 34px;
+                        bordered: root.header-focused && root.header-index == 0;
+                        button-border: Theme.text;
+                        button-bg: Theme.accent;
+                        icon-color: Theme.on-accent;
+                        tooltip-text: "Launch trainer";
+                        clicked => { root.launch(); }
+                    }
+
+                    if root.edit-mode: IconButton {
                         icon: @image-url("../../assets/images/icons/copy.svg");
                         icon-size: 16px;
                         button-size: 34px;
-                        bordered: false;
-                        icon-color: Theme.text-dim;
+                        bordered: root.header-focused && root.header-index == 1;
+                        button-border: Theme.accent;
+                        icon-color: root.header-focused && root.header-index == 1 ? Theme.accent : Theme.text-dim;
                         tooltip-text: "Copy launch script";
                         clicked => { root.copy-script(); }
+                    }
+
+                    if root.edit-mode: IconButton {
+                        icon: @image-url("../../assets/images/icons/delete.svg");
+                        icon-size: 16px;
+                        button-size: 34px;
+                        bordered: root.header-focused && root.header-index == 2;
+                        button-border: Theme.danger;
+                        icon-color: Theme.danger;
+                        tooltip-text: "Delete trainer";
+                        clicked => { root.delete(); }
                     }
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/close.svg");
                         icon-size: 16px;
                         button-size: 34px;
-                        bordered: false;
-                        icon-color: Theme.text-dim;
+                        bordered: root.header-focused && root.header-index == (root.edit-mode ? 3 : 0);
+                        button-border: Theme.accent;
+                        icon-color: root.header-focused && root.header-index == (root.edit-mode ? 3 : 0) ? Theme.accent : Theme.text-dim;
                         tooltip-text: "Close";
                         clicked => { root.cancel(); }
                     }
@@ -369,6 +402,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             text <=> root.form-name;
                             highlighted: root.focused-index == 0;
                             edited => { root.name-changed(self.text); }
+                            navigate-vertical(delta) => { root.navigate-from(0, delta); }
                         }
                     }
 
@@ -449,6 +483,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 text <=> root.form-game-args;
                                 highlighted: root.focused-index == 4;
                                 edited => { root.game-args-changed(self.text); }
+                                navigate-vertical(delta) => { root.navigate-from(4, delta); }
                             }
                             Text {
                                 text: "Picking a Windows shortcut (.lnk) fills both fields from the shortcut's target and arguments.";
@@ -566,6 +601,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 placeholder: "3";
                                 text <=> root.cheat-delay;
                                 highlighted: root.focused-index == 9;
+                                navigate-vertical(delta) => { root.navigate-from(9, delta); }
                             }
                         }
 
@@ -645,6 +681,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                     text: c.label;
                                     highlighted: root.focused-index == i + 11 && root.sub-index == 0;
                                     edited => { root.cheat-label-changed(c.id, self.text); }
+                                    navigate-vertical(delta) => { root.navigate-from(i + 11, delta); }
                                 }
 
                                 RecordButton {

@@ -360,6 +360,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
+    app.set_form_header_focused(false);
+    app.set_form_header_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -441,6 +443,8 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
+    app.set_form_header_focused(false);
+    app.set_form_header_index(0);
     app.set_show_add_edit(true);
 }
 
@@ -1476,6 +1480,8 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
             app.set_show_add_edit(false);
             app.set_form_focused_index(-1);
             app.set_form_sub_index(0);
+            app.set_form_header_focused(false);
+            app.set_form_header_index(0);
             refresh_trainer_list(&app, &state);
             show_toast(
                 &app,

@@ -6,12 +6,12 @@ import { GamepadHintBar } from "../components/gamepad-hint-bar.slint";
 import { ListView } from "std-widgets.slint";
 
 export component HomeScreen inherits Rectangle {
-    in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
+    in property <int> search-focus-sequence: 0;
     in-out property <int> focused-index: -1;
-    // Gamepad/keyboard focus on the header row (Search, Refresh, Edit, Add,
-    // Settings) instead of the trainer list. header-index 0..4 selects which
+    // Gamepad/keyboard focus on the header row (Search, Refresh, Add,
+    // Settings) instead of the trainer list. header-index 0..3 selects which
     // button; driven by AppWindow's move-selection/move-horizontal.
     in property <bool> header-focused: false;
     in property <int> header-index: 0;
@@ -34,8 +34,8 @@ export component HomeScreen inherits Rectangle {
     callback refresh();
     callback launch-trainer(int);
     callback edit-trainer(int);
-    callback delete-trainer(int);
     callback search-changed(string);
+    callback navigate-from-search(int);
 
     background: Theme.bg;
 
@@ -106,6 +106,7 @@ export component HomeScreen inherits Rectangle {
                             }
 
                             TextInput {
+                                private property <int> focus-sequence: root.search-focus-sequence;
                                 horizontal-stretch: 1;
                                 vertical-alignment: center;
                                 single-line: true;
@@ -114,6 +115,18 @@ export component HomeScreen inherits Rectangle {
                                 font-size: 17px;
                                 edited => { root.search-changed(self.text); }
                                 init => { self.focus(); }
+                                changed focus-sequence => { self.focus(); }
+                                key-pressed(event) => {
+                                    if event.text == Key.DownArrow {
+                                        root.navigate-from-search(1);
+                                        accept
+                                    } else if event.text == Key.UpArrow {
+                                        root.navigate-from-search(-1);
+                                        accept
+                                    } else {
+                                        reject
+                                    }
+                                }
                             }
 
                             IconButton {
@@ -152,19 +165,8 @@ export component HomeScreen inherits Rectangle {
                     }
 
                     IconButton {
-                        icon: @image-url("../../assets/images/icons/edit.svg");
-                        icon-size: root.header-hl(2) ? 20px : 17px;
-                        button-size: 40px;
-                        bordered: !root.edit-mode;
-                        button-bg: root.edit-mode ? Theme.accent : Theme.panel2;
-                        icon-color: root.edit-mode ? Theme.on-accent : (root.header-hl(2) ? Theme.accent : Theme.text-dim);
-                        tooltip-text: root.edit-mode ? "Done editing" : "Edit trainers";
-                        clicked => { root.edit-mode = !root.edit-mode; }
-                    }
-
-                    IconButton {
                         icon: @image-url("../../assets/images/icons/add.svg");
-                        icon-size: root.header-hl(3) ? 23px : 20px;
+                        icon-size: root.header-hl(2) ? 23px : 20px;
                         button-size: 40px;
                         bordered: false;
                         button-bg: Theme.accent;
@@ -175,9 +177,9 @@ export component HomeScreen inherits Rectangle {
 
                     IconButton {
                         icon: @image-url("../../assets/images/icons/settings.svg");
-                        icon-size: root.header-hl(4) ? 22px : 19px;
+                        icon-size: root.header-hl(3) ? 22px : 19px;
                         button-size: 40px;
-                        icon-color: root.header-hl(4) ? Theme.accent : Theme.text;
+                        icon-color: root.header-hl(3) ? Theme.accent : Theme.text;
                         tooltip-text: "Settings";
                         clicked => { root.open-settings(); }
                     }
@@ -352,14 +354,33 @@ export component HomeScreen inherits Rectangle {
                     padding-top: 14px;
                     padding-bottom: 24px;
 
-                    ListView {
+                    trainer-list := ListView {
+                        private property <int> navigation-index: root.focused-index;
+                        private property <bool> navigation-in-header: root.header-focused;
+
+                        function bring-focused-row-into-view() {
+                            if self.visible-height <= 0px || root.header-focused || root.focused-index < 0 || root.focused-index >= root.visible-trainers.length {
+                                return;
+                            }
+
+                            let row-height = Theme.row-icon-size + Theme.row-padding-v * 2 + Theme.row-gap;
+                            let row-y = self.viewport-y + root.focused-index * row-height;
+                            if row-y < 0px {
+                                self.viewport-y -= row-y;
+                            } else if row-y + row-height > self.visible-height {
+                                self.viewport-y -= row-y + row-height - self.visible-height;
+                            }
+                        }
+
+                        changed navigation-index => { self.bring-focused-row-into-view(); }
+                        changed navigation-in-header => { self.bring-focused-row-into-view(); }
+                        changed visible-height => { self.bring-focused-row-into-view(); }
+
                         for t[i] in root.visible-trainers: TrainerRow {
                             trainer: t;
-                            edit-mode: root.edit-mode;
                             selected: !root.header-focused && i == root.focused-index;
                             launch => { root.launch-trainer(t.id); }
                             edit => { root.edit-trainer(t.id); }
-                            delete => { root.delete-trainer(t.id); }
                             select => { root.focused-index = i; }
                         }
                     }

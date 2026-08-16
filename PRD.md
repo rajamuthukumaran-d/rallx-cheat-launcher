@@ -3,26 +3,23 @@
 I want to create an app to launch trainer for game. I call the app Rallx Cheat Launcher. It will be used in ROG Ally and steam deck so it needs to be optimised for handheld gaming pc with touch screen and gamepad, it will have following screens,
 
 ## Home:
- - It will have list of cheats in a list view
- - The list row will have
-        - Trainer logo from exe
-        - Name
-        - Version
-        - Size
-        - Play icon
-- When edit is enable following will also show up in the list
-        - Copy Icon (to copy launch script)
-        - Edit icon (Open Add screen and fill the existing data and change the title to edit)
-        - Delete icon (Delete the trainer. Show confirmation before performing the action)
-- A add (open add trainer page) and gear icon (open settings page) at the top
+- It will have list of cheats in a list view.
+- The list row will have:
+  - Trainer logo from exe
+  - Name
+  - Version
+  - Size
+  - Play icon
+- Clicking the row opens its Edit popup; only the row's Play icon launches it.
+- Search, refresh, add (open Add Trainer), and settings icons appear at the top.
 - Gamepad navigation
-        - A - launch
-        - X - Edit
-        - Y - search
-        - Select - Delete (Show confirmation popup)
-        - Right bumper - copy launch script if configured
-        - Start - open settings
-        - checkbox to close the app after launching the trainer
+  - A - launch
+  - X - Edit
+  - Y - search
+  - Select - Delete (Show confirmation popup)
+  - Right bumper - copy launch script if configured
+  - Start - open settings
+- Checkbox to close the app after launching the trainer.
 
 ## Settings:
 - It will contain option to select trainer folder, default shortcut to launch trainer assosiated with the game that is running and theme
@@ -40,6 +37,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Add/Edit trainer popup:
 - This is a popup when a trainer is dragged into the app or pressed add icon from the home
+- When editing, its header can launch the trainer, copy its launch script, or
+  delete it after confirmation.
 - Show the selected trainer information and allow user to modify Name
 - An option to choose game exe
 - An optional executable to watch. After that app has been seen running and
@@ -56,8 +55,9 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
 
 ## Functionality,
 - List all the trainer in a selected folder
-- Clicking on the list or the play button or pressing A from gamepad launches
-  or reuses the trainer, waits for a fresh trainer to become ready, and then
+- Clicking a trainer row opens its Edit popup. Clicking the row's play button
+  or pressing A from gamepad launches or reuses the trainer, waits for a fresh
+  trainer to become ready, and then
   injects its saved default cheats without minimizing it. The normal-mode
   global shortcut uses the same workflow but minimizes a freshly launched
   trainer after injection when default cheats exist. Repeated shortcut presses
