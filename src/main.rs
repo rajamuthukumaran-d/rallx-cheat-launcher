@@ -25,6 +25,7 @@ mod key_capture;
 mod keys;
 mod launch_args;
 mod renderer;
+mod startup;
 mod trainer;
 
 /// Slint's default renderer fails on some handheld GPU drivers; the software
@@ -191,6 +192,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config = config::load_config();
+
+    // The app is portable, so it may have moved since the login entry was
+    // created. A manual launch from its new location repairs that entry.
+    if config.start_on_login {
+        if let Err(err) = startup::set_enabled(true) {
+            dialog::warning(&format!("Could not update Windows login startup: {err}"));
+        }
+    }
 
     // Integrity level is fixed when a process is created, so honoring "run as
     // administrator" means handing the whole startup over to a fresh elevated

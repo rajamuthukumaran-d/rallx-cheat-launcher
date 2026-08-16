@@ -19,8 +19,8 @@ use crate::config::{
     DEFAULT_CHEAT_DELAY_MS,
 };
 use crate::{
-    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
-    CheatEntry, Palette, Theme, TrainerItem,
+    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, startup, trainer,
+    AppWindow, CheatEntry, Palette, Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -545,6 +545,7 @@ fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_close_after_launch(config.close_after_launch_global);
     app.set_confirm_exit(config.confirm_exit);
     app.set_run_in_background(config.run_in_background);
+    app.set_start_on_login(config.start_on_login);
     app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
@@ -568,6 +569,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.close_after_launch_global = app.get_close_after_launch();
     config.confirm_exit = app.get_confirm_exit();
     config.run_in_background = app.get_run_in_background();
+    config.start_on_login = app.get_start_on_login();
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,
@@ -582,6 +584,36 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.theme.set_compact(theme.get_compact());
 
     let _ = crate::config::save_config(&config);
+}
+
+fn update_start_on_login(state: &AppState, enabled: bool) -> Result<(), String> {
+    let previous = state.config.borrow().start_on_login;
+    if enabled == previous {
+        return Ok(());
+    }
+
+    startup::set_enabled(enabled)
+        .map_err(|err| format!("Could not update Windows login startup: {err}"))?;
+
+    let save_result = {
+        let mut config = state.config.borrow_mut();
+        config.start_on_login = enabled;
+        crate::config::save_config(&config)
+    };
+
+    if let Err(err) = save_result {
+        state.config.borrow_mut().start_on_login = previous;
+        let rollback = startup::set_enabled(previous).err();
+        let mut message = format!("Could not save the Start on login setting: {err}");
+        if let Some(rollback_err) = rollback {
+            message.push_str(&format!(
+                ". Windows startup could not be restored: {rollback_err}"
+            ));
+        }
+        return Err(message);
+    }
+
+    Ok(())
 }
 
 struct LaunchScript {
@@ -1243,6 +1275,18 @@ pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
             // elevate::finish_requested_restart.
             elevate::request_restart();
             let _ = slint::quit_event_loop();
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_start_on_login_changed(move |enabled| {
+            let app = app_weak.unwrap();
+            if let Err(err) = update_start_on_login(&state, enabled) {
+                app.set_start_on_login(state.config.borrow().start_on_login);
+                show_toast(&app, err);
+            }
         });
     }
 

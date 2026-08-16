@@ -29,6 +29,10 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
   hidden in the system tray and minimizing its window returns it to the tray,
   while the global shortcut continues matching the running game's watched
   executable. This is separate from `--launch` background mode.
+- "Start on login" option (off by default). When enabled, Windows starts the
+  normal app automatically after the current user signs in. The "Run in
+  background" setting independently controls whether that automatic start is
+  hidden in the system tray or opens the main window.
 - Confirm before closing the app is on by default.
 - Option to run as administrator, plus a button to restart into it right away
     - Run as administrator is on by default.
