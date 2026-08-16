@@ -132,7 +132,8 @@ silently violate a requirement from another section.)
   "run as administrator" (applied at next startup) plus a restart-elevated
   button that is disabled once the process is already elevated. Defaults are:
   run in background off, close after launch off, confirm before closing on,
-  and run as administrator on.
+  and run as administrator on. Confirm before closing applies to the native
+  title-bar close button as well as keyboard and gamepad close actions.
 - **Conflicting global settings:** enabling global close-after-launch disables
   Start on login and Run in background. Confirm first when either is active,
   and explain why any dependent setting is disabled in its field.

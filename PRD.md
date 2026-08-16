@@ -40,7 +40,8 @@ I want to create an app to launch trainer for game. I call the app Rallx Cheat L
   Start on login. If either conflicting setting is active, ask for confirmation
   before enabling it; otherwise enable it immediately. Disabled settings show
   why they are unavailable.
-- Confirm before closing the app is on by default.
+- Confirm before closing the app is on by default and applies to the title-bar
+  close button as well as keyboard and gamepad close actions.
 - Option to run as administrator, plus a button to restart into it right away
     - Run as administrator is on by default.
     - Windows blocks injected key presses aimed at an elevated program, so default cheats only reach a trainer that needs admin rights when the app is elevated too

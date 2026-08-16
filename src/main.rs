@@ -200,6 +200,16 @@ fn set_windowed_tray_enabled(
     Ok(())
 }
 
+fn request_close_confirmation(app: &AppWindow) -> bool {
+    if !app.get_confirm_exit() {
+        return false;
+    }
+
+    app.set_confirm_popup_index(0);
+    app.set_show_quit_confirm(true);
+    true
+}
+
 /// Requests native activation after Slint has (re)created the HWND. Showing a
 /// tray-hidden Slint window is asynchronous, so callers retry this briefly.
 fn bring_window_to_front(app: &AppWindow) -> bool {
@@ -350,7 +360,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // run_event_loop_until_quit is deliberate: once minimized, no app window
     // remains visible, but the normal-mode tray and global game-matching
     // hotkey must keep running until Exit is chosen.
-    app.window().on_close_requested(|| {
+    let app_weak = app.as_weak();
+    app.window().on_close_requested(move || {
+        if let Some(app) = app_weak.upgrade() {
+            if request_close_confirmation(&app) {
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+        }
+
         let _ = slint::quit_event_loop();
         slint::CloseRequestResponse::HideWindow
     });
@@ -487,5 +504,15 @@ mod tests {
         assert!(tray.get_active());
         tray.set_active(false);
         assert!(!tray.get_active());
+
+        app.set_confirm_exit(true);
+        assert!(request_close_confirmation(&app));
+        assert!(app.get_show_quit_confirm());
+        assert_eq!(app.get_confirm_popup_index(), 0);
+
+        app.set_show_quit_confirm(false);
+        app.set_confirm_exit(false);
+        assert!(!request_close_confirmation(&app));
+        assert!(!app.get_show_quit_confirm());
     }
 }

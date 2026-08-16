@@ -1013,12 +1013,12 @@ export component AppWindow inherits Window {
     // (which keeps real keyboard focus even under the add/edit form), so the
     // virtual keyboard only ever opens for an actual gamepad A press.
     public function gamepad-accept(via-gamepad: bool) {
-        if root.show-keyboard {
+        if root.show-quit-confirm {
+            root.close-quit-confirm(root.confirm-popup-index == 1);
+        } else if root.show-keyboard {
             root.activate-keyboard-key();
         } else if root.show-close-after-launch-confirm {
             root.close-close-after-launch-confirm(root.confirm-popup-index == 1);
-        } else if root.show-quit-confirm {
-            root.close-quit-confirm(root.confirm-popup-index == 1);
         } else if root.recording {
             if root.confirm-popup-index == 0 {
                 root.cancel-recording();
@@ -1059,12 +1059,12 @@ export component AppWindow inherits Window {
     // cancels regardless of confirm-popup-index - it's a dedicated cancel
     // button.
     public function gamepad-cancel() {
-        if root.show-keyboard {
+        if root.show-quit-confirm {
+            root.close-quit-confirm(false);
+        } else if root.show-keyboard {
             root.close-keyboard();
         } else if root.show-close-after-launch-confirm {
             root.close-close-after-launch-confirm(false);
-        } else if root.show-quit-confirm {
-            root.close-quit-confirm(false);
         } else if root.recording {
             root.cancel-recording();
         } else if root.show-add-edit {
@@ -1259,12 +1259,6 @@ export component AppWindow inherits Window {
             confirm => { root.close-delete-confirm(true); }
         }
 
-        if root.show-quit-confirm: QuitConfirmModal {
-            confirm-focused: root.confirm-popup-index == 1;
-            cancel => { root.close-quit-confirm(false); }
-            confirm => { root.close-quit-confirm(true); }
-        }
-
         if root.show-close-after-launch-confirm: CloseAfterLaunchConfirmModal {
             confirm-focused: root.confirm-popup-index == 1;
             cancel => { root.close-close-after-launch-confirm(false); }
@@ -1342,6 +1336,14 @@ export component AppWindow inherits Window {
             }
         }
 
+        // Kept last among the modals so a native title-bar close request can
+        // present this confirmation above an editor or recorder already open.
+        if root.show-quit-confirm: QuitConfirmModal {
+            confirm-focused: root.confirm-popup-index == 1;
+            cancel => { root.close-quit-confirm(false); }
+            confirm => { root.close-quit-confirm(true); }
+        }
+
         Toast {
             message: root.toast-message;
             show: root.show-toast;
@@ -1362,6 +1364,7 @@ export component AppWindow inherits Window {
     changed recording => { if (!root.recording) { key-scope.focus(); } }
     changed show-add-edit => { if (!root.show-add-edit) { key-scope.focus(); } }
     changed show-keyboard => { if (!root.show-keyboard) { key-scope.focus(); } }
+    changed show-quit-confirm => { key-scope.focus(); }
 
     // These are mutated both by the Settings screen's own controls (via two-way
     // bindings / the key recorder) and by the gamepad handlers above, so
