@@ -9,10 +9,10 @@ import { KeyRecorderModal } from "modals/key-recorder-modal.slint";
 import { VirtualKeyboardModal } from "modals/virtual-keyboard-modal.slint";
 import { QuitConfirmModal } from "modals/quit-confirm-modal.slint";
 import { Toast } from "components/toast.slint";
-import { TrayIcon } from "tray.slint";
+import { TrayIcon, WindowedTrayIcon } from "tray.slint";
 
 // Theme is re-exported so app_state can seed it from config.json on startup.
-export { TrainerItem, CheatEntry, Theme, Palette, TrayIcon }
+export { TrainerItem, CheatEntry, Theme, Palette, TrayIcon, WindowedTrayIcon }
 
 export enum AppView { home, settings }
 
@@ -30,14 +30,17 @@ export component AppWindow inherits Window {
     in-out property <bool> edit-mode: false;
     in-out property <bool> show-search: false;
     in-out property <string> search-query: "";
-    in-out property <bool> close-after-launch: true;
+    in-out property <bool> close-after-launch: false;
     // Whether B on Home (with nothing else open) shows a confirmation before
     // quitting, or quits immediately. Toggle lives in Settings.
     in-out property <bool> confirm-exit: true;
+    // Normal windowed mode may start hidden in the tray and return there when
+    // minimized. Launch-option background mode remains a separate startup path.
+    in-out property <bool> run-in-background: false;
     // Persisted intent to start elevated; only takes effect on the next
     // startup, since a running process's integrity level is fixed. is-elevated
     // is what this process actually got, set once by Rust at wire-up.
-    in-out property <bool> run-as-admin: false;
+    in-out property <bool> run-as-admin: true;
     in property <bool> is-elevated: false;
     in-out property <bool> show-quit-confirm: false;
     // Left/right position shared by the delete-confirm, key-recorder, and
@@ -82,6 +85,8 @@ export component AppWindow inherits Window {
     in-out property <string> form-game-exe-display: "No game selected";
     in-out property <string> form-shortcut: "";
     in-out property <string> form-shortcut-display: "Click to record shortcut";
+    in-out property <bool> form-auto-trigger-cheats: false;
+    in-out property <string> form-cheat-delay: "3";
     in-out property <[CheatEntry]> form-cheats: [];
     // Absolute path of the exe picked in the Add-trainer form, kept alongside
     // form-exe-display (filename only) because the file still has to be moved
@@ -106,8 +111,9 @@ export component AppWindow inherits Window {
     in-out property <bool> form-game-expanded: false;
     // Gamepad focus target spanning the whole add/edit form: 0 Name,
     // 1 Trainer executable, 2 Game section header, 3 Game executable, 4 Game
-    // launch options, 5 Generate .bat, 6 Watched app, 7 Shortcut, 8 Add cheat, one stop per
-    // cheat row, then Cancel/Save last. Keep in sync with
+    // launch options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Auto
+    // trigger, 9 Delay, 10 Add cheat, one stop per cheat row, then Cancel/Save
+    // last. Delay is skipped while auto trigger is disabled. Keep in sync with
     // form-item-count()/activate-form-focused() below and
     // AddEditTrainerModal's layout.
     in-out property <int> form-focused-index: -1;
@@ -139,6 +145,9 @@ export component AppWindow inherits Window {
     in-out property <string> toast-message: "";
 
     callback launch-trainer(int);
+    // Internal normal-mode path used after the global shortcut matches a
+    // running watched executable. It differs only in post-injection minimizing.
+    callback launch-trainer-hotkey(int);
     callback refresh-trainers();
 
     public function launch-focused-trainer() {
@@ -164,12 +173,13 @@ export component AppWindow inherits Window {
     }
 
     // Keep in sync with SettingsScreen's control layout: trainer folder,
-    // default shortcut, close-after-launch, confirm-before-close,
-    // run-as-admin, restart-as-admin, accent color, background, row style -
+    // default shortcut, run-in-background, close-after-launch,
+    // confirm-before-close, run-as-admin, restart-as-admin, accent color,
+    // background, row style -
     // each a single up/down stop; accent/background/row-style are then cycled
     // in place with left/right (see move-settings-value).
     function settings-item-count() -> int {
-        return 9;
+        return 10;
     }
 
     // Slint's imperative `for` has no index binding (only the declarative
@@ -213,11 +223,11 @@ export component AppWindow inherits Window {
     }
 
     function move-settings-value(delta: int) {
-        if root.settings-focused-index == 6 {
+        if root.settings-focused-index == 7 {
             root.cycle-accent(delta);
-        } else if root.settings-focused-index == 7 {
-            root.set-dark-theme(!Theme.dark);
         } else if root.settings-focused-index == 8 {
+            root.set-dark-theme(!Theme.dark);
+        } else if root.settings-focused-index == 9 {
             root.set-compact-rows(!Theme.compact);
         }
     }
@@ -228,19 +238,19 @@ export component AppWindow inherits Window {
         } else {
             root.settings-focused-index = max(0, min(root.settings-focused-index + delta, root.settings-item-count() - 1));
         }
-        // The restart-as-admin button (index 5) is disabled once the process is
+        // The restart-as-admin button (index 6) is disabled once the process is
         // already elevated, so step over it instead of parking focus on a stop
         // where A does nothing.
-        if root.settings-focused-index == 5 && root.is-elevated {
-            root.settings-focused-index = delta < 0 ? 4 : 6;
+        if root.settings-focused-index == 6 && root.is-elevated {
+            root.settings-focused-index = delta < 0 ? 5 : 7;
         }
     }
 
     // Name, Trainer executable, Game section header, Game executable, Game
-    // launch options, Generate .bat, Watched app, Shortcut, Add cheat, one stop per cheat
-    // row, Cancel/Save.
+    // launch options, Shortcut, Generate .bat, Watched app, Auto trigger,
+    // Delay, Add cheat, one stop per cheat row, Cancel/Save.
     function form-item-count() -> int {
-        return 10 + root.form-cheats.length;
+        return 12 + root.form-cheats.length;
     }
 
     // The trainer-executable row (index 1) is only rendered when adding, so
@@ -256,7 +266,7 @@ export component AppWindow inherits Window {
 
     function toggle-game-section() {
         root.form-game-expanded = !root.form-game-expanded;
-        if !root.form-game-expanded && root.form-focused-index >= 3 && root.form-focused-index <= 5 {
+        if !root.form-game-expanded && root.form-focused-index >= 3 && root.form-focused-index <= 6 {
             root.form-focused-index = 2;
             root.form-sub-index = 0;
         }
@@ -271,13 +281,16 @@ export component AppWindow inherits Window {
         if root.form-focused-index == 1 && !root.form-exe-field-visible() {
             root.form-focused-index = delta < 0 ? 0 : 2;
         }
-        // The Game section's three body rows collapse away together, so they
-        // are stepped over as one block back to the header or on to Shortcut.
-        if root.form-focused-index >= 3 && root.form-focused-index <= 5 && !root.form-game-expanded {
-            root.form-focused-index = delta < 0 ? 2 : 6;
+        // The Game section's four body rows collapse away together, so they
+        // are stepped over as one block back to the header or on to Watched app.
+        if root.form-focused-index >= 3 && root.form-focused-index <= 6 && !root.form-game-expanded {
+            root.form-focused-index = delta < 0 ? 2 : 7;
         }
-        if root.form-focused-index == 5 && !root.form-can-generate-bat() {
-            root.form-focused-index = delta < 0 ? 4 : 6;
+        if root.form-focused-index == 6 && !root.form-can-generate-bat() {
+            root.form-focused-index = delta < 0 ? 5 : 7;
+        }
+        if root.form-focused-index == 9 && !root.form-auto-trigger-cheats {
+            root.form-focused-index = delta < 0 ? 8 : 10;
         }
         root.form-sub-index = 0;
     }
@@ -288,11 +301,11 @@ export component AppWindow inherits Window {
     function form-sub-count() -> int {
         if root.form-focused-index == 3 && !root.form-game-exe-path.is-empty {
             return 2;
-        } else if root.form-focused-index == 6 && !root.form-watched-exe-path.is-empty {
+        } else if root.form-focused-index == 7 && !root.form-watched-exe-path.is-empty {
             return 2;
-        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
+        } else if root.form-focused-index >= 11 && root.form-focused-index < 11 + root.form-cheats.length {
             return 3;
-        } else if root.form-focused-index == 9 + root.form-cheats.length {
+        } else if root.form-focused-index == 11 + root.form-cheats.length {
             return 2;
         }
         return 1;
@@ -581,7 +594,7 @@ export component AppWindow inherits Window {
         root.keyboard-row = 0;
         root.keyboard-col = 0;
         root.keyboard-shift = false;
-        root.keyboard-numpad = false;
+        root.keyboard-numpad = target == "delay";
         root.show-keyboard = true;
     }
 
@@ -710,7 +723,7 @@ export component AppWindow inherits Window {
     }
 
     // Maps settings-focused-index to whichever control it represents. Rows
-    // 6-8 (accent/background/row-style) are cycled with left/right instead -
+    // 7-9 (accent/background/row-style) are cycled with left/right instead -
     // see move-settings-value - so A is a no-op there.
     function activate-settings-focused() {
         if root.settings-focused-index == 0 {
@@ -718,12 +731,14 @@ export component AppWindow inherits Window {
         } else if root.settings-focused-index == 1 {
             root.start-default-shortcut-recording();
         } else if root.settings-focused-index == 2 {
-            root.close-after-launch = !root.close-after-launch;
+            root.run-in-background = !root.run-in-background;
         } else if root.settings-focused-index == 3 {
-            root.confirm-exit = !root.confirm-exit;
+            root.close-after-launch = !root.close-after-launch;
         } else if root.settings-focused-index == 4 {
+            root.confirm-exit = !root.confirm-exit;
+        } else if root.settings-focused-index == 5 {
             root.run-as-admin = !root.run-as-admin;
-        } else if root.settings-focused-index == 5 && !root.is-elevated {
+        } else if root.settings-focused-index == 6 && !root.is-elevated {
             root.restart-as-admin();
         }
     }
@@ -762,29 +777,35 @@ export component AppWindow inherits Window {
             if via-gamepad {
                 root.open-keyboard("game-args", -1, root.form-game-args);
             }
-        } else if root.form-focused-index == 5 && root.form-can-generate-bat() {
+        } else if root.form-focused-index == 5 {
+            root.start-shortcut-recording();
+        } else if root.form-focused-index == 6 && root.form-can-generate-bat() {
             root.generate-game-bat();
-        } else if root.form-focused-index == 6 {
+        } else if root.form-focused-index == 7 {
             if root.form-sub-index == 0 {
                 root.browse-watched-exe();
             } else {
                 root.clear-watched-exe();
             }
-        } else if root.form-focused-index == 7 {
-            root.start-shortcut-recording();
         } else if root.form-focused-index == 8 {
+            root.form-auto-trigger-cheats = !root.form-auto-trigger-cheats;
+        } else if root.form-focused-index == 9 {
+            if via-gamepad && root.form-auto-trigger-cheats {
+                root.open-keyboard("delay", -1, root.form-cheat-delay);
+            }
+        } else if root.form-focused-index == 10 {
             root.add-cheat-row();
-        } else if root.form-focused-index >= 9 && root.form-focused-index < 9 + root.form-cheats.length {
+        } else if root.form-focused-index >= 11 && root.form-focused-index < 11 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 if via-gamepad {
-                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 9].id, root.form-cheats[root.form-focused-index - 9].label);
+                    root.open-keyboard("cheat", root.form-cheats[root.form-focused-index - 11].id, root.form-cheats[root.form-focused-index - 11].label);
                 }
             } else if root.form-sub-index == 1 {
-                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 9].id);
+                root.start-cheat-recording(root.form-cheats[root.form-focused-index - 11].id);
             } else if root.form-sub-index == 2 {
-                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 9].id);
+                root.remove-cheat-row(root.form-cheats[root.form-focused-index - 11].id);
             }
-        } else if root.form-focused-index == 9 + root.form-cheats.length {
+        } else if root.form-focused-index == 11 + root.form-cheats.length {
             if root.form-sub-index == 0 {
                 root.cancel-form();
             } else {
@@ -949,6 +970,9 @@ export component AppWindow inherits Window {
     // controls or the gamepad path; app_state reads the current values back
     // off this window and writes them to config.json.
     callback settings-changed();
+    // Lets normal windowed startup show or hide its tray icon immediately when
+    // the setting changes. CLI launch-option mode does not subscribe to this.
+    callback run-in-background-changed(bool);
     // Ends this process and starts an elevated copy in its place; app_state
     // persists the pending settings first, since the new process reads them
     // back off config.json.
@@ -1037,6 +1061,7 @@ export component AppWindow inherits Window {
             height: 100%;
             folder-path: root.folder-path;
             default-shortcut-label: root.default-shortcut-label;
+            run-in-background <=> root.run-in-background;
             close-after-launch <=> root.close-after-launch;
             confirm-exit <=> root.confirm-exit;
             run-as-admin <=> root.run-as-admin;
@@ -1079,6 +1104,8 @@ export component AppWindow inherits Window {
             form-game-args <=> root.form-game-args;
             form-watched-exe-display: root.form-watched-exe-display;
             form-shortcut-display: root.form-shortcut-display;
+            auto-trigger-cheats <=> root.form-auto-trigger-cheats;
+            cheat-delay <=> root.form-cheat-delay;
             cheats: root.form-cheats;
             show-exe-field: root.form-exe-field-visible();
             game-expanded: root.form-game-expanded;
@@ -1148,6 +1175,10 @@ export component AppWindow inherits Window {
     // watching the property covers every path in one place.
     changed close-after-launch => { root.settings-changed(); }
     changed confirm-exit => { root.settings-changed(); }
+    changed run-in-background => {
+        root.settings-changed();
+        root.run-in-background-changed(root.run-in-background);
+    }
     changed run-as-admin => { root.settings-changed(); }
     changed default-shortcut-label => { root.settings-changed(); }
 }

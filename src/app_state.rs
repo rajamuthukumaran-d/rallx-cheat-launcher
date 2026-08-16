@@ -1,21 +1,26 @@
 #![allow(dead_code)]
 
-// UI-only prototype state: an in-memory trainer list wired to the Slint UI so
-// every screen (Home, Settings, Add/Edit, Delete confirm, key recorder) is
-// fully interactive. Trainer folder selection and discovery are real
-// (see trainer::sync_trainer_configs); launching and hotkey registration are
-// not wired up yet - see trainer.rs/hotkey.rs for those.
+// In-memory trainer state and the Rust side of the Slint callback wiring.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
+use slint::{
+    Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
+};
 
-use crate::config::{AppConfig, CheatConfig, TrainerConfig};
+use crate::config::{
+    AppConfig, CheatConfig, LaunchScriptConfig, TrainerConfig, DEFAULT_AUTO_TRIGGER_CHEATS,
+    DEFAULT_CHEAT_DELAY_MS,
+};
 use crate::{
-    clipboard, elevate, exe_icon, exe_version, keys, launch_args, trainer, AppWindow, CheatEntry,
-    Palette, Theme, TrainerItem,
+    clipboard, elevate, exe_icon, exe_version, hotkey, keys, launch_args, trainer, AppWindow,
+    CheatEntry, Palette, Theme, TrainerItem,
 };
 
 // Placeholders the UI shows for an unassigned value; also the sentinels the
@@ -24,6 +29,49 @@ const NO_EXE_PLACEHOLDER: &str = "No executable selected";
 const NO_GAME_PLACEHOLDER: &str = "No game selected";
 const NO_WATCHED_EXE_PLACEHOLDER: &str = "No app selected";
 const NOT_SET: &str = "Not set";
+const GLOBAL_HOTKEY_POLL: Duration = Duration::from_millis(50);
+const TRAINER_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const HOTKEY_RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
+const CHEAT_INTERVAL: Duration = Duration::from_millis(300);
+
+static WINDOWED_UIPI_WARNED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Windowed,
+    Background,
+}
+
+struct RegisteredWindowHotkey {
+    canonical: String,
+    id: u32,
+    _manager: hotkey::HotkeyManager,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NormalLaunchOrigin {
+    Interface,
+    GlobalHotkey,
+}
+
+struct TrackedNormalTrainer {
+    process: Arc<Mutex<trainer::LaunchedTrainer>>,
+    watcher_started: bool,
+}
+
+#[derive(Default)]
+struct NormalLaunchState {
+    trainers: Mutex<HashMap<String, TrackedNormalTrainer>>,
+    sequence_running: AtomicBool,
+}
+
+struct NormalSequenceGuard(Arc<NormalLaunchState>);
+
+impl Drop for NormalSequenceGuard {
+    fn drop(&mut self) {
+        self.0.sequence_running.store(false, Ordering::SeqCst);
+    }
+}
 
 const ROW_COLORS: [(u8, u8, u8); 6] = [
     (0x5b, 0x8c, 0xff),
@@ -39,6 +87,10 @@ struct AppState {
     next_trainer_id: Cell<i32>,
     next_cheat_id: Cell<i32>,
     config: RefCell<AppConfig>,
+    window_hotkey: RefCell<Option<RegisteredWindowHotkey>>,
+    hotkey_poll_timer: Timer,
+    hotkey_scan_in_progress: Arc<AtomicBool>,
+    normal_launch_state: Arc<NormalLaunchState>,
 }
 
 fn row_color(index: usize) -> Color {
@@ -65,6 +117,8 @@ struct NewTrainer<'a> {
     game_args: &'a str,
     watched_exe: &'a str,
     shortcut: &'a str,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: i32,
     cheats: Vec<CheatEntry>,
     icon: Option<Image>,
 }
@@ -90,6 +144,8 @@ fn make_trainer(state: &AppState, fields: NewTrainer) -> TrainerItem {
         game_args: fields.game_args.into(),
         watched_exe: fields.watched_exe.into(),
         shortcut: fields.shortcut.into(),
+        auto_trigger_cheats: fields.auto_trigger_cheats,
+        cheat_delay_ms: fields.cheat_delay_ms,
         color,
         letter: letter.into(),
         has_icon: fields.icon.is_some(),
@@ -122,6 +178,7 @@ fn config_to_trainer_item(
     let icon = exe_path.and_then(exe_icon::extract_icon);
     let size = format_size(cfg.size_bytes);
     let shortcut = cfg
+        .launch_script
         .launch_shortcut
         .as_deref()
         .map(keys::format_combo_for_display)
@@ -133,10 +190,12 @@ fn config_to_trainer_item(
             version: &cfg.version,
             size: &size,
             exe: &cfg.filename,
-            game_exe: cfg.game_exe.as_deref().unwrap_or_default(),
-            game_args: cfg.game_args.as_deref().unwrap_or_default(),
+            game_exe: cfg.launch_script.game_exe.as_deref().unwrap_or_default(),
+            game_args: cfg.launch_script.game_args.as_deref().unwrap_or_default(),
             watched_exe: cfg.watched_exe.as_deref().unwrap_or_default(),
             shortcut: &shortcut,
+            auto_trigger_cheats: cfg.auto_trigger_cheats,
+            cheat_delay_ms: cfg.cheat_delay_ms.min(i32::MAX as u64) as i32,
             cheats,
             icon,
         },
@@ -215,7 +274,8 @@ fn find_trainer(state: &AppState, id: i32) -> Option<TrainerItem> {
 }
 
 /// Applies a virtual-keyboard edit (insert/backspace) to whichever field
-/// `keyboard_target` names ("search" | "name" | "cheat" | "game-args"), then mirrors the
+/// `keyboard_target` names ("search" | "name" | "cheat" | "game-args" |
+/// "delay"), then mirrors the
 /// result back into `keyboard_preview` so the popup's own display stays in
 /// sync. The actual string mutation happens here in Rust rather than in
 /// Slint, since Slint's imperative string API has no substring/pop support.
@@ -231,6 +291,7 @@ fn apply_keyboard_edit(app: &AppWindow, state: &AppState, edit: impl FnOnce(&mut
         }
         "name" => app.set_form_name(text.into()),
         "game-args" => app.set_form_game_args(text.into()),
+        "delay" => app.set_form_cheat_delay(text.into()),
         "cheat" => {
             let id = app.get_keyboard_cheat_id();
             let cheats: Vec<CheatEntry> = cheats_to_vec(&app.get_form_cheats())
@@ -253,6 +314,32 @@ fn show_toast(app: &AppWindow, message: impl Into<SharedString>) {
     app.set_show_toast(true);
 }
 
+fn format_cheat_delay(delay_ms: i32) -> String {
+    let seconds = f64::from(delay_ms.max(0)) / 1_000.0;
+    if delay_ms % 1_000 == 0 {
+        format!("{seconds:.0}")
+    } else {
+        format!("{seconds:.3}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
+
+fn parse_cheat_delay(value: &str) -> Result<u64, String> {
+    let seconds = value.trim().parse::<f64>().map_err(|_| {
+        "Enter the auto-trigger delay in seconds (for example, 3 or 1.5)".to_string()
+    })?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return Err("The auto-trigger delay must be zero or greater".to_string());
+    }
+    let milliseconds = seconds * 1_000.0;
+    if milliseconds > u64::MAX as f64 {
+        return Err("The auto-trigger delay is too large".to_string());
+    }
+    Ok(milliseconds.round() as u64)
+}
+
 fn open_add_form(app: &AppWindow) {
     app.set_editing_id(-1);
     app.set_form_title("Add trainer".into());
@@ -268,6 +355,8 @@ fn open_add_form(app: &AppWindow) {
     app.set_form_watched_exe_path("".into());
     app.set_form_shortcut("".into());
     app.set_form_shortcut_display("Click to record shortcut".into());
+    app.set_form_auto_trigger_cheats(DEFAULT_AUTO_TRIGGER_CHEATS);
+    app.set_form_cheat_delay(format_cheat_delay(DEFAULT_CHEAT_DELAY_MS as i32).into());
     app.set_form_cheats(ModelRc::new(VecModel::from(Vec::<CheatEntry>::new())));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
@@ -347,6 +436,8 @@ fn open_edit_form(app: &AppWindow, trainer: &TrainerItem) {
     });
     app.set_form_shortcut(trainer.shortcut.clone());
     app.set_form_shortcut_display(trainer.shortcut.clone());
+    app.set_form_auto_trigger_cheats(trainer.auto_trigger_cheats);
+    app.set_form_cheat_delay(format_cheat_delay(trainer.cheat_delay_ms).into());
     app.set_form_cheats(ModelRc::new(VecModel::from(cheats_to_vec(&trainer.cheats))));
     app.set_form_focused_index(-1);
     app.set_form_sub_index(0);
@@ -363,6 +454,8 @@ struct TrainerFormValues<'a> {
     game_args: &'a str,
     watched_exe: &'a str,
     shortcut: &'a str,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: u64,
     cheats: &'a [CheatEntry],
 }
 
@@ -401,10 +494,12 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
     let mut config = state.config.borrow_mut();
     if let Some(entry) = config.trainers.iter_mut().find(|t| t.filename == filename) {
         entry.name = form.name.to_string();
-        entry.game_exe = game_exe;
-        entry.game_args = game_args;
+        entry.launch_script.game_exe = game_exe;
+        entry.launch_script.game_args = game_args;
         entry.watched_exe = watched_exe;
-        entry.launch_shortcut = launch_shortcut;
+        entry.launch_script.launch_shortcut = launch_shortcut;
+        entry.auto_trigger_cheats = form.auto_trigger_cheats;
+        entry.cheat_delay_ms = form.cheat_delay_ms;
         entry.default_cheats = default_cheats;
     } else {
         config.trainers.push(TrainerConfig {
@@ -412,12 +507,16 @@ fn apply_form_to_config(state: &AppState, filename: &str, form: TrainerFormValue
             filename: filename.to_string(),
             version: String::new(),
             size_bytes: 0,
-            game_exe,
-            game_args,
+            launch_script: LaunchScriptConfig {
+                game_exe,
+                game_args,
+                launch_shortcut,
+                close_after_launch: false,
+            },
             watched_exe,
-            launch_shortcut,
+            auto_trigger_cheats: form.auto_trigger_cheats,
+            cheat_delay_ms: form.cheat_delay_ms,
             default_cheats,
-            close_after_launch: false,
         });
     }
 
@@ -441,6 +540,7 @@ fn palette_accent(app: &AppWindow, (r, g, b): (u8, u8, u8)) -> Color {
 fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_close_after_launch(config.close_after_launch_global);
     app.set_confirm_exit(config.confirm_exit);
+    app.set_run_in_background(config.run_in_background);
     app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
@@ -463,6 +563,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     let mut config = state.config.borrow_mut();
     config.close_after_launch_global = app.get_close_after_launch();
     config.confirm_exit = app.get_confirm_exit();
+    config.run_in_background = app.get_run_in_background();
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,
@@ -536,12 +637,561 @@ fn build_launch_script(trainer: &TrainerItem, close_after_launch: bool) -> Launc
     }
 }
 
-pub fn wire(app: &AppWindow, config: AppConfig) {
+fn sync_window_hotkey(state: &AppState) -> Result<(), String> {
+    let desired = state
+        .config
+        .borrow()
+        .default_shortcut
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(keys::parse_combo)
+        .transpose()
+        .map_err(|err| format!("The default launch shortcut is invalid: {err}"))?;
+    let desired_canonical = desired.as_ref().map(keys::KeyCombo::canonical);
+
+    if state
+        .window_hotkey
+        .borrow()
+        .as_ref()
+        .map(|registered| registered.canonical.as_str())
+        == desired_canonical.as_deref()
+    {
+        return Ok(());
+    }
+
+    *state.window_hotkey.borrow_mut() = None;
+    let Some(combo) = desired else {
+        return Ok(());
+    };
+
+    let canonical = combo.canonical();
+    let mut manager = hotkey::HotkeyManager::new()?;
+    let id = manager.register(&combo)?;
+    *state.window_hotkey.borrow_mut() = Some(RegisteredWindowHotkey {
+        canonical,
+        id,
+        _manager: manager,
+    });
+    Ok(())
+}
+
+fn find_matching_watched_trainer<F>(
+    candidates: &[(i32, PathBuf)],
+    mut is_running: F,
+) -> Result<Option<i32>, std::io::Error>
+where
+    F: FnMut(&Path) -> Result<bool, std::io::Error>,
+{
+    let mut first_error = None;
+    for (id, watched_exe) in candidates {
+        match is_running(watched_exe) {
+            Ok(true) => return Ok(Some(*id)),
+            Ok(false) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) if first_error.is_none() => first_error = Some(err),
+            Err(_) => {}
+        }
+    }
+
+    match first_error {
+        Some(err) => Err(err),
+        None => Ok(None),
+    }
+}
+
+struct NormalLaunchRequest {
+    name: String,
+    filename: String,
+    folder: PathBuf,
+    watched_exe: Option<PathBuf>,
+    cheats: Vec<keys::KeyCombo>,
+    invalid_cheats: Vec<String>,
+    auto_trigger_cheats: bool,
+    cheat_delay_ms: u64,
+    close_after_launch: bool,
+    launch_hotkey: Option<keys::KeyCombo>,
+    origin: NormalLaunchOrigin,
+}
+
+fn should_minimize_normal_trainer(
+    origin: NormalLaunchOrigin,
+    launched_now: bool,
+    triggered_cheats: bool,
+    auto_trigger_cheats: bool,
+    close_without_auto_trigger: bool,
+) -> bool {
+    (origin == NormalLaunchOrigin::GlobalHotkey
+        && triggered_cheats
+        && (launched_now || !auto_trigger_cheats))
+        || (launched_now && close_without_auto_trigger)
+}
+
+pub(crate) fn should_trigger_default_cheats(
+    has_default_cheats: bool,
+    auto_trigger_cheats: bool,
+    launched_now: bool,
+) -> bool {
+    has_default_cheats && (auto_trigger_cheats || !launched_now)
+}
+
+fn should_start_normal_watcher(close_after_launch: bool, has_watched_exe: bool) -> bool {
+    has_watched_exe && !close_after_launch
+}
+
+fn post_toast(app: slint::Weak<AppWindow>, message: impl Into<String>) {
+    let message = message.into();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(app) = app.upgrade() {
+            show_toast(&app, message);
+        }
+    });
+}
+
+fn warn_if_normal_cheats_cannot_reach(
+    filename: &str,
+    cheats: &[keys::KeyCombo],
+    mode: trainer::LaunchMode,
+) {
+    if cheats.is_empty()
+        || mode != trainer::LaunchMode::Elevated
+        || elevate::is_elevated()
+        || WINDOWED_UIPI_WARNED.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+
+    crate::dialog::warning(&format!(
+        "{filename} was launched with administrator rights, but Rallx Cheat Launcher is not.\n\n\
+         Windows blocks key injection into an elevated program, so the default \
+         cheats ({}) will not reach it.\n\n\
+         Turn on Settings -> Run as administrator to make them work.",
+        cheats
+            .iter()
+            .map(keys::KeyCombo::canonical)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+}
+
+fn ensure_normal_watcher(
+    launch_state: &Arc<NormalLaunchState>,
+    filename: &str,
+    display_name: &str,
+    watched_exe: Option<&Path>,
+    process: &Arc<Mutex<trainer::LaunchedTrainer>>,
+    app: slint::Weak<AppWindow>,
+) {
+    let Some(watched_exe) = watched_exe else {
+        return;
+    };
+
+    let should_start = {
+        let mut trainers = launch_state
+            .trainers
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let Some(tracked) = trainers.get_mut(filename) else {
+            return;
+        };
+        if tracked.watcher_started {
+            false
+        } else {
+            tracked.watcher_started = true;
+            true
+        }
+    };
+    if !should_start {
+        return;
+    }
+
+    let watched_exe = watched_exe.to_path_buf();
+    let filename = filename.to_string();
+    let display_name = display_name.to_string();
+    let process = process.clone();
+    let launch_state = launch_state.clone();
+    std::thread::spawn(move || {
+        match trainer::wait_for_watched_exe_exit(&watched_exe, Duration::from_millis(500)) {
+            Ok(()) => {
+                let cleanup_result = process
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner())
+                    .terminate();
+                let mut trainers = launch_state
+                    .trainers
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner());
+                if trainers
+                    .get(&filename)
+                    .is_some_and(|tracked| Arc::ptr_eq(&tracked.process, &process))
+                {
+                    trainers.remove(&filename);
+                }
+                drop(trainers);
+
+                match cleanup_result {
+                    Ok(()) => post_toast(
+                        app,
+                        format!("Closed {display_name} after the selected app exited"),
+                    ),
+                    Err(err) => post_toast(
+                        app,
+                        format!(
+                            "Could not close {display_name}: {err}. Close it manually to finish cleanup."
+                        ),
+                    ),
+                }
+            }
+            Err(err) => {
+                let mut trainers = launch_state
+                    .trainers
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(tracked) = trainers.get_mut(&filename) {
+                    if Arc::ptr_eq(&tracked.process, &process) {
+                        tracked.watcher_started = false;
+                    }
+                }
+                drop(trainers);
+                post_toast(app, format!("Could not watch the selected app: {err}"));
+            }
+        }
+    });
+}
+
+fn request_normal_trainer_launch(
+    app: &AppWindow,
+    state: &Rc<AppState>,
+    id: i32,
+    origin: NormalLaunchOrigin,
+) {
+    let Some(item) = find_trainer(state, id) else {
+        return;
+    };
+    let Some(folder) = state.config.borrow().trainer_folder.clone() else {
+        show_toast(app, "No trainer folder selected");
+        return;
+    };
+
+    let mut cheats = Vec::new();
+    let mut invalid_cheats = Vec::new();
+    for cheat in item.cheats.iter() {
+        if is_unset(&cheat.key) {
+            continue;
+        }
+        match keys::parse_combo(&cheat.key) {
+            Ok(combo) => cheats.push(combo),
+            Err(err) => invalid_cheats.push(format!("{} ({err})", cheat.label)),
+        }
+    }
+
+    let launch_hotkey = if origin == NormalLaunchOrigin::GlobalHotkey {
+        state
+            .window_hotkey
+            .borrow()
+            .as_ref()
+            .and_then(|registered| keys::parse_combo(&registered.canonical).ok())
+    } else {
+        None
+    };
+    let watched_exe = match item.watched_exe.trim() {
+        "" => None,
+        path => Some(PathBuf::from(path)),
+    };
+    let request = NormalLaunchRequest {
+        name: item.name.to_string(),
+        filename: item.exe.to_string(),
+        folder,
+        watched_exe,
+        cheats,
+        invalid_cheats,
+        auto_trigger_cheats: item.auto_trigger_cheats,
+        cheat_delay_ms: item.cheat_delay_ms.max(0) as u64,
+        close_after_launch: app.get_close_after_launch(),
+        launch_hotkey,
+        origin,
+    };
+    let app_weak = app.as_weak();
+    let launch_state = state.normal_launch_state.clone();
+
+    if launch_state.sequence_running.swap(true, Ordering::SeqCst) {
+        show_toast(app, "A trainer launch is already in progress");
+        return;
+    }
+    let guard = NormalSequenceGuard(launch_state.clone());
+
+    std::thread::spawn(move || {
+        let _guard = guard;
+        let has_default_cheats = !request.cheats.is_empty() || !request.invalid_cheats.is_empty();
+        if has_default_cheats {
+            if let Some(hotkey) = request.launch_hotkey.as_ref() {
+                if !keys::wait_until_released(hotkey, HOTKEY_RELEASE_TIMEOUT) {
+                    post_toast(
+                        app_weak,
+                        "The launch shortcut is still held. Release it and try again.",
+                    );
+                    return;
+                }
+            }
+        }
+
+        let existing = launch_state
+            .trainers
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .get(&request.filename)
+            .map(|tracked| tracked.process.clone());
+        let existing_running = match existing.as_ref() {
+            Some(process) => match process
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .is_running()
+            {
+                Ok(running) => running,
+                Err(err) => {
+                    post_toast(
+                        app_weak,
+                        format!("Could not check whether {} is running: {err}", request.name),
+                    );
+                    return;
+                }
+            },
+            None => false,
+        };
+
+        let (process, launched_now) = match existing {
+            Some(existing) if existing_running => (existing, false),
+            stale => {
+                if stale.is_some() {
+                    launch_state
+                        .trainers
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner())
+                        .remove(&request.filename);
+                }
+                let launched = match trainer::launch_trainer(&request.folder, &request.filename) {
+                    Ok(process) => process,
+                    Err(err) => {
+                        post_toast(
+                            app_weak,
+                            format!("Failed to launch {}: {err}", request.name),
+                        );
+                        return;
+                    }
+                };
+                let process = Arc::new(Mutex::new(launched));
+                launch_state
+                    .trainers
+                    .lock()
+                    .unwrap_or_else(|err| err.into_inner())
+                    .insert(
+                        request.filename.clone(),
+                        TrackedNormalTrainer {
+                            process: process.clone(),
+                            watcher_started: false,
+                        },
+                    );
+                (process, true)
+            }
+        };
+
+        if should_start_normal_watcher(request.close_after_launch, request.watched_exe.is_some()) {
+            ensure_normal_watcher(
+                &launch_state,
+                &request.filename,
+                &request.name,
+                request.watched_exe.as_deref(),
+                &process,
+                app_weak.clone(),
+            );
+        }
+
+        let trigger_cheats = should_trigger_default_cheats(
+            has_default_cheats,
+            request.auto_trigger_cheats,
+            launched_now,
+        );
+
+        if trigger_cheats {
+            let mode = process.lock().unwrap_or_else(|err| err.into_inner()).mode();
+            warn_if_normal_cheats_cannot_reach(&request.filename, &request.cheats, mode);
+        }
+
+        let close_without_auto_trigger = request.close_after_launch && !request.auto_trigger_cheats;
+        if launched_now && (trigger_cheats || close_without_auto_trigger) {
+            let wait_result = process
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .wait_for_input_idle(TRAINER_READY_TIMEOUT);
+            if let Err(err) = wait_result {
+                eprintln!(
+                    "Could not wait for {} to become ready: {err}",
+                    request.filename
+                );
+            }
+        }
+        if launched_now && trigger_cheats {
+            std::thread::sleep(Duration::from_millis(request.cheat_delay_ms));
+        }
+
+        if trigger_cheats {
+            let still_running = process
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .is_running();
+            match still_running {
+                Ok(true) => {}
+                Ok(false) => {
+                    post_toast(
+                        app_weak,
+                        format!(
+                            "{} exited before its default cheats could be sent",
+                            request.name
+                        ),
+                    );
+                    return;
+                }
+                Err(err) => {
+                    post_toast(
+                        app_weak,
+                        format!("Could not check whether {} is running: {err}", request.name),
+                    );
+                    return;
+                }
+            }
+        }
+
+        let mut failed = Vec::new();
+        if trigger_cheats {
+            failed = request.invalid_cheats;
+            for (index, combo) in request.cheats.iter().enumerate() {
+                if index > 0 {
+                    std::thread::sleep(CHEAT_INTERVAL);
+                }
+                if let Err(err) = keys::press(combo) {
+                    failed.push(format!("{combo} ({err})"));
+                }
+            }
+        }
+
+        if should_minimize_normal_trainer(
+            request.origin,
+            launched_now,
+            trigger_cheats,
+            request.auto_trigger_cheats,
+            close_without_auto_trigger,
+        ) {
+            process
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .minimize_if_foreground();
+        }
+
+        if !failed.is_empty() {
+            post_toast(
+                app_weak.clone(),
+                format!("Could not send {}", failed.join(", ")),
+            );
+        }
+
+        if request.close_after_launch {
+            let _ = slint::invoke_from_event_loop(|| {
+                let _ = slint::quit_event_loop();
+            });
+        } else if failed.is_empty() {
+            post_toast(
+                app_weak,
+                if launched_now {
+                    if has_default_cheats && !request.auto_trigger_cheats {
+                        format!(
+                            "Launched {}; trigger it again to activate default cheats",
+                            request.name
+                        )
+                    } else {
+                        format!("Launched {}", request.name)
+                    }
+                } else if trigger_cheats {
+                    format!("Activated default cheats for {}", request.name)
+                } else {
+                    format!("{} is already running", request.name)
+                },
+            );
+        }
+    });
+}
+
+fn start_window_hotkey_poll(app: &AppWindow, state: &Rc<AppState>) {
+    let app_weak = app.as_weak();
+    let state_weak = Rc::downgrade(state);
+
+    state
+        .hotkey_poll_timer
+        .start(TimerMode::Repeated, GLOBAL_HOTKEY_POLL, move || {
+            let pressed = hotkey::drain_pressed();
+            let Some(state) = state_weak.upgrade() else {
+                return;
+            };
+            let registered_id = state
+                .window_hotkey
+                .borrow()
+                .as_ref()
+                .map(|registered| registered.id);
+            if !registered_id.is_some_and(|id| pressed.contains(&id)) {
+                return;
+            }
+
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            // Recording the configured shortcut necessarily emits its global
+            // event too. Drain it above, but never turn that recording action
+            // into an accidental trainer launch.
+            if app.get_recording() || state.hotkey_scan_in_progress.swap(true, Ordering::SeqCst) {
+                return;
+            }
+
+            let candidates = state
+                .trainers
+                .borrow()
+                .iter()
+                .filter_map(|item| {
+                    let watched_exe = item.watched_exe.trim();
+                    (!watched_exe.is_empty()).then(|| (item.id, PathBuf::from(watched_exe)))
+                })
+                .collect::<Vec<_>>();
+            let result_weak = app.as_weak();
+            let scan_in_progress = state.hotkey_scan_in_progress.clone();
+
+            std::thread::spawn(move || {
+                let result =
+                    find_matching_watched_trainer(&candidates, trainer::watched_exe_is_running);
+                let _ = slint::invoke_from_event_loop(move || {
+                    scan_in_progress.store(false, Ordering::SeqCst);
+                    let Some(app) = result_weak.upgrade() else {
+                        return;
+                    };
+                    match result {
+                        Ok(Some(id)) => app.invoke_launch_trainer_hotkey(id),
+                        Ok(None) => show_toast(&app, "No running game matches a trainer"),
+                        Err(err) => {
+                            show_toast(&app, format!("Could not identify the running game: {err}"))
+                        }
+                    }
+                });
+            });
+        });
+}
+
+pub fn wire(app: &AppWindow, config: AppConfig, mode: AppMode) {
     let state = Rc::new(AppState {
         trainers: RefCell::new(Vec::new()),
         next_trainer_id: Cell::new(1),
         next_cheat_id: Cell::new(100),
         config: RefCell::new(config),
+        window_hotkey: RefCell::new(None),
+        hotkey_poll_timer: Timer::default(),
+        hotkey_scan_in_progress: Arc::new(AtomicBool::new(false)),
+        normal_launch_state: Arc::new(NormalLaunchState::default()),
     });
 
     let items = rescan_trainer_folder(&state);
@@ -559,6 +1209,13 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     // re-checked whenever Settings opens.
     app.set_is_elevated(elevate::is_elevated());
     apply_settings_to_ui(app, &state.config.borrow());
+
+    if mode == AppMode::Windowed {
+        if let Err(err) = sync_window_hotkey(&state) {
+            show_toast(app, err);
+        }
+        start_window_hotkey_poll(app, &state);
+    }
 
     app.on_quit_app(|| {
         let _ = slint::quit_event_loop();
@@ -591,6 +1248,11 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
         app.on_settings_changed(move || {
             let app = app_weak.unwrap();
             persist_settings_from_ui(&app, &state);
+            if mode == AppMode::Windowed {
+                if let Err(err) = sync_window_hotkey(&state) {
+                    show_toast(&app, err);
+                }
+            }
         });
     }
 
@@ -604,102 +1266,20 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
     }
 
     {
-        let app_weak = app.as_weak();
         let state = state.clone();
+        let app_weak = app.as_weak();
         app.on_launch_trainer(move |id| {
             let app = app_weak.unwrap();
-            let Some(trainer) = find_trainer(&state, id) else {
-                return;
-            };
-            let Some(folder) = state.config.borrow().trainer_folder.clone() else {
-                show_toast(&app, "No trainer folder selected");
-                return;
-            };
+            request_normal_trainer_launch(&app, &state, id, NormalLaunchOrigin::Interface);
+        });
+    }
 
-            // Most trainers need elevation, and that path blocks on the UAC
-            // prompt - on the UI thread the whole window would stop redrawing
-            // until the user answers it. The result comes back through the
-            // event loop.
-            let name = trainer.name.to_string();
-            let exe = trainer.exe.to_string();
-            let watched_exe = trainer.watched_exe.to_string();
-            let close_after_launch = app.get_close_after_launch();
-            let result_weak = app.as_weak();
-
-            std::thread::spawn(move || {
-                let mut result = trainer::launch_trainer(&folder, &exe);
-
-                if let Ok(process) = result.as_mut() {
-                    if !watched_exe.is_empty() {
-                        let launched_weak = result_weak.clone();
-                        let launched_name = name.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(app) = launched_weak.upgrade() {
-                                show_toast(
-                                    &app,
-                                    format!("Launched {launched_name} - waiting for the selected app to close"),
-                                );
-                            }
-                        });
-
-                        let watch_result = trainer::wait_for_watched_exe_exit(
-                            Path::new(&watched_exe),
-                            std::time::Duration::from_millis(500),
-                        );
-                        match watch_result {
-                            Ok(()) => {
-                                let cleanup_result = process.terminate();
-                                let cleanup_weak = result_weak.clone();
-                                let cleanup_name = name.clone();
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    match cleanup_result {
-                                        Ok(()) => {
-                                            let _ = slint::quit_event_loop();
-                                        }
-                                        Err(err) => {
-                                            eprintln!(
-                                                "Could not close the launched trainer: {err}"
-                                            );
-                                            if let Some(app) = cleanup_weak.upgrade() {
-                                                show_toast(
-                                                    &app,
-                                                    format!(
-                                                        "Could not close {cleanup_name}: {err}. Close it manually to finish cleanup."
-                                                    ),
-                                                );
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                            Err(err) => {
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(app) = result_weak.upgrade() {
-                                        show_toast(
-                                            &app,
-                                            format!("Could not watch the selected app: {err}"),
-                                        );
-                                    }
-                                });
-                            }
-                        }
-                        return;
-                    }
-                }
-
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(app) = result_weak.upgrade() else {
-                        return;
-                    };
-                    match result {
-                        Ok(_) if close_after_launch => {
-                            let _ = slint::quit_event_loop();
-                        }
-                        Ok(_) => show_toast(&app, format!("Launched {name}")),
-                        Err(err) => show_toast(&app, format!("Failed to launch {name}: {err}")),
-                    }
-                });
-            });
+    {
+        let state = state.clone();
+        let app_weak = app.as_weak();
+        app.on_launch_trainer_hotkey(move |id| {
+            let app = app_weak.unwrap();
+            request_normal_trainer_launch(&app, &state, id, NormalLaunchOrigin::GlobalHotkey);
         });
     }
 
@@ -733,7 +1313,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                     .trainers
                     .iter()
                     .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer.exe))
-                    .is_some_and(|entry| entry.close_after_launch);
+                    .is_some_and(|entry| entry.launch_script.close_after_launch);
 
                 let built = build_launch_script(&trainer, close_after_launch);
                 match clipboard::set_text(&built.script) {
@@ -835,6 +1415,15 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
             let game_exe = app.get_form_game_exe_path().to_string();
             let game_args = app.get_form_game_args().to_string();
             let watched_exe = app.get_form_watched_exe_path().to_string();
+            let auto_trigger_cheats = app.get_form_auto_trigger_cheats();
+            let cheat_delay_ms = match parse_cheat_delay(app.get_form_cheat_delay().as_str()) {
+                Ok(delay) => delay,
+                Err(message) if auto_trigger_cheats => {
+                    show_toast(&app, message);
+                    return;
+                }
+                Err(_) => DEFAULT_CHEAT_DELAY_MS,
+            };
             let cheats = cheats_to_vec(&app.get_form_cheats());
             let editing_id = app.get_editing_id();
 
@@ -875,6 +1464,8 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                     game_args: &game_args,
                     watched_exe: &watched_exe,
                     shortcut: &shortcut,
+                    auto_trigger_cheats,
+                    cheat_delay_ms,
                     cheats: &cheats,
                 },
             );
@@ -1090,7 +1681,7 @@ pub fn wire(app: &AppWindow, config: AppConfig) {
                 .trainers
                 .iter()
                 .find(|entry| entry.filename.eq_ignore_ascii_case(&trainer_filename))
-                .is_some_and(|entry| entry.close_after_launch);
+                .is_some_and(|entry| entry.launch_script.close_after_launch);
 
             let launcher = match std::env::current_exe() {
                 Ok(path) => path,
@@ -1248,6 +1839,8 @@ mod tests {
             game_args: "".into(),
             watched_exe: "".into(),
             shortcut: shortcut.into(),
+            auto_trigger_cheats: true,
+            cheat_delay_ms: DEFAULT_CHEAT_DELAY_MS as i32,
             color: Color::from_rgb_u8(0, 0, 0),
             letter: "R".into(),
             has_icon: false,
@@ -1294,5 +1887,123 @@ mod tests {
         assert_eq!(built.dropped, ["shortcut \"banana\"", "Ammo \"durian\""]);
         assert!(!built.script.contains("--hotkey"));
         assert!(built.script.contains("--defaultcheat=\"Ctrl+Numpad1\""));
+    }
+
+    #[test]
+    fn global_hotkey_selects_the_first_running_watched_executable() {
+        let candidates = vec![
+            (10, PathBuf::from(r"C:\Games\First.exe")),
+            (20, PathBuf::from(r"C:\Games\Second.exe")),
+            (30, PathBuf::from(r"C:\Games\Third.exe")),
+        ];
+        let mut checked = Vec::new();
+
+        let matched = find_matching_watched_trainer(&candidates, |path| {
+            checked.push(path.to_path_buf());
+            Ok(path.ends_with("Second.exe"))
+        })
+        .unwrap();
+
+        assert_eq!(matched, Some(20));
+        assert_eq!(
+            checked,
+            candidates[..2]
+                .iter()
+                .map(|(_, path)| path.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_deleted_watched_executable_does_not_block_another_match() {
+        let candidates = vec![
+            (10, PathBuf::from(r"C:\Games\Deleted.exe")),
+            (20, PathBuf::from(r"C:\Games\Running.exe")),
+        ];
+
+        let matched = find_matching_watched_trainer(&candidates, |path| {
+            if path.ends_with("Deleted.exe") {
+                Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+            } else {
+                Ok(true)
+            }
+        })
+        .unwrap();
+
+        assert_eq!(matched, Some(20));
+    }
+
+    #[test]
+    fn interface_launch_minimizes_only_for_close_without_auto_trigger() {
+        assert!(!should_minimize_normal_trainer(
+            NormalLaunchOrigin::Interface,
+            true,
+            true,
+            true,
+            false,
+        ));
+        assert!(should_minimize_normal_trainer(
+            NormalLaunchOrigin::Interface,
+            true,
+            false,
+            false,
+            true,
+        ));
+    }
+
+    #[test]
+    fn global_hotkey_minimizes_fresh_auto_or_deferred_cheats() {
+        assert!(should_minimize_normal_trainer(
+            NormalLaunchOrigin::GlobalHotkey,
+            true,
+            true,
+            true,
+            false,
+        ));
+        assert!(!should_minimize_normal_trainer(
+            NormalLaunchOrigin::GlobalHotkey,
+            false,
+            true,
+            true,
+            false,
+        ));
+        assert!(!should_minimize_normal_trainer(
+            NormalLaunchOrigin::GlobalHotkey,
+            true,
+            false,
+            true,
+            false,
+        ));
+        assert!(should_minimize_normal_trainer(
+            NormalLaunchOrigin::GlobalHotkey,
+            false,
+            true,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn disabled_auto_trigger_waits_for_the_next_action() {
+        assert!(!should_trigger_default_cheats(true, false, true));
+        assert!(should_trigger_default_cheats(true, false, false));
+        assert!(should_trigger_default_cheats(true, true, true));
+        assert!(!should_trigger_default_cheats(false, true, true));
+    }
+
+    #[test]
+    fn cheat_delay_converts_between_seconds_and_milliseconds() {
+        assert_eq!(parse_cheat_delay("3"), Ok(3_000));
+        assert_eq!(parse_cheat_delay("1.25"), Ok(1_250));
+        assert_eq!(format_cheat_delay(1_250), "1.25");
+        assert!(parse_cheat_delay("-1").is_err());
+        assert!(parse_cheat_delay("later").is_err());
+    }
+
+    #[test]
+    fn normal_close_after_launch_suppresses_watched_cleanup() {
+        assert!(!should_start_normal_watcher(true, true));
+        assert!(should_start_normal_watcher(false, true));
+        assert!(!should_start_normal_watcher(false, false));
     }
 }

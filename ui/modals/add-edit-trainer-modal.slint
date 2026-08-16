@@ -3,6 +3,7 @@ import { CheatEntry } from "../types.slint";
 import { ModalBackdrop } from "../components/modal-backdrop.slint";
 import { IconButton } from "../components/icon-button.slint";
 import { TextField } from "../components/text-field.slint";
+import { ToggleSwitch } from "../components/toggle-switch.slint";
 import { ScrollView } from "std-widgets.slint";
 
 component FieldLabel inherits Text {
@@ -208,6 +209,8 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     in-out property <string> form-game-args;
     in property <string> form-watched-exe-display: "No app selected";
     in property <string> form-shortcut-display: "Click to record shortcut";
+    in-out property <bool> auto-trigger-cheats: false;
+    in-out property <string> cheat-delay: "3";
     in property <[CheatEntry]> cheats;
     // Whether the Game section's body is open. Collapsed by default: a trainer
     // needs no game configured, so the section is opt-in rather than four rows
@@ -222,10 +225,11 @@ export component AddEditTrainerModal inherits ModalBackdrop {
     in property <bool> show-exe-field: true;
     // Gamepad focus target spanning the whole form: 0 Name, 1 Trainer
     // executable, 2 Game section header, 3 Game executable, 4 Game launch
-    // options, 5 Generate .bat, 6 Watched app, 7 Shortcut, 8 Add cheat, one stop per cheat
-    // row, then the Cancel/Save row last. -1 means nothing focused. Driven by
+    // options, 5 Shortcut, 6 Generate .bat, 7 Watched app, 8 Auto trigger,
+    // 9 Delay, 10 Add cheat, one stop per cheat row, then the Cancel/Save row
+    // last. Delay is skipped when auto trigger is disabled. -1 means nothing focused. Driven by
     // AppWindow's move-form-selection/activate-form-focused via D-Pad up/down
-    // and A; 3-5 are skipped while the Game section is collapsed.
+    // and A; 3-6 are skipped while the Game section is collapsed.
     in property <int> focused-index: -1;
     // Left/right position within the focused row (cheat row: 0 label,
     // 1 record key, 2 remove; Cancel/Save row: 0 Cancel, 1 Save). Driven by
@@ -457,6 +461,23 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         if root.game-expanded: VerticalLayout {
                             vertical-stretch: 0;
                             spacing: 6px;
+                            padding-bottom: 16px;
+
+                            FieldLabel {
+                                text: "Shortcut to launch trainer";
+                                color: root.focused-index == 5 ? Theme.accent : Theme.text-dim;
+                                font-weight: root.focused-index == 5 ? 700 : 600;
+                            }
+                            RecordButton {
+                                label: root.form-shortcut-display;
+                                highlighted: root.focused-index == 5;
+                                clicked => { root.record-shortcut(); }
+                            }
+                        }
+
+                        if root.game-expanded: VerticalLayout {
+                            vertical-stretch: 0;
+                            spacing: 6px;
                             padding-bottom: 4px;
 
                             HorizontalLayout {
@@ -464,7 +485,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 ActionButton {
                                     label: "Generate .bat";
                                     enabled: root.can-generate-bat;
-                                    highlighted: root.focused-index == 5;
+                                    highlighted: root.focused-index == 6;
                                     clicked => { root.generate-bat(); }
                                 }
                             }
@@ -486,10 +507,10 @@ export component AddEditTrainerModal inherits ModalBackdrop {
 
                         watched-field := ExeField {
                             vertical-stretch: 0;
-                            label-text: "App to wait for before closing";
+                            label-text: "Game/app executable to watch";
                             value-text: root.form-watched-exe-display;
-                            highlighted: root.focused-index == 6 && root.sub-index == 0;
-                            clear-highlighted: root.focused-index == 6 && root.sub-index == 1;
+                            highlighted: root.focused-index == 7 && root.sub-index == 0;
+                            clear-highlighted: root.focused-index == 7 && root.sub-index == 1;
                             can-clear: root.form-watched-exe-display != "No app selected";
                             bottom-padding: 0px;
                             browse => { root.browse-watched-exe(); }
@@ -497,7 +518,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                         }
 
                         Text {
-                            text: "Rallx watches this app. When it closes, Rallx closes the trainer and then exits. Leave this empty to turn the feature off.";
+                            text: "The global shortcut launches this trainer while this exact app is running. When the app closes, Rallx closes the trainer; Rallx itself exits only in launch-option background mode. Leave this empty to turn both behaviors off.";
                             color: Theme.text-dim;
                             font-size: 12px;
                             wrap: word-wrap;
@@ -506,17 +527,55 @@ export component AddEditTrainerModal inherits ModalBackdrop {
 
                     VerticalLayout {
                         vertical-stretch: 0;
-                        spacing: 6px;
+                        spacing: 10px;
                         padding-bottom: 20px;
-                        FieldLabel {
-                            text: "Shortcut to launch trainer";
-                            color: root.focused-index == 7 ? Theme.accent : Theme.text-dim;
-                            font-weight: root.focused-index == 7 ? 700 : 600;
+
+                        Rectangle {
+                            height: 38px;
+
+                            HorizontalLayout {
+                                spacing: 12px;
+                                cross-axis-alignment: center;
+
+                                FieldLabel {
+                                    horizontal-stretch: 1;
+                                    text: "Auto trigger cheat on launch";
+                                    color: root.focused-index == 8 ? Theme.accent : Theme.text-dim;
+                                    font-weight: root.focused-index == 8 ? 700 : 600;
+                                }
+
+                                ToggleSwitch {
+                                    checked <=> root.auto-trigger-cheats;
+                                }
+                            }
+
+                            TouchArea {
+                                clicked => { root.auto-trigger-cheats = !root.auto-trigger-cheats; }
+                            }
                         }
-                        RecordButton {
-                            label: root.form-shortcut-display;
-                            highlighted: root.focused-index == 7;
-                            clicked => { root.record-shortcut(); }
+
+                        if root.auto-trigger-cheats: VerticalLayout {
+                            spacing: 6px;
+
+                            FieldLabel {
+                                text: "Delay before auto trigger (seconds)";
+                                color: root.focused-index == 9 ? Theme.accent : Theme.text-dim;
+                                font-weight: root.focused-index == 9 ? 700 : 600;
+                            }
+                            TextField {
+                                placeholder: "3";
+                                text <=> root.cheat-delay;
+                                highlighted: root.focused-index == 9;
+                            }
+                        }
+
+                        Text {
+                            text: root.auto-trigger-cheats
+                                ? "Default cheats are sent after the trainer opens and this delay elapses."
+                                : "Default cheats are skipped on launch. Trigger the trainer again with its hotkey to send them.";
+                            color: Theme.text-dim;
+                            font-size: 12px;
+                            wrap: word-wrap;
                         }
                     }
 
@@ -530,8 +589,8 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             FieldLabel {
                                 horizontal-stretch: 1;
                                 text: "Cheats to enable";
-                                color: root.focused-index == 8 ? Theme.accent : Theme.text-dim;
-                                font-weight: root.focused-index == 8 ? 700 : 600;
+                                color: root.focused-index == 10 ? Theme.accent : Theme.text-dim;
+                                font-weight: root.focused-index == 10 ? 700 : 600;
                             }
 
                             Rectangle {
@@ -546,13 +605,13 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                         source: @image-url("../../assets/images/icons/add.svg");
                                         width: 14px;
                                         height: 14px;
-                                        colorize: root.focused-index == 8 ? Theme.accent.brighter(60%) : Theme.accent;
+                                        colorize: root.focused-index == 10 ? Theme.accent.brighter(60%) : Theme.accent;
                                     }
                                     Text {
                                         text: "Add cheat";
-                                        color: root.focused-index == 8 ? Theme.accent.brighter(60%) : Theme.accent;
+                                        color: root.focused-index == 10 ? Theme.accent.brighter(60%) : Theme.accent;
                                         font-size: 13px;
-                                        font-weight: root.focused-index == 8 ? 800 : 600;
+                                        font-weight: root.focused-index == 10 ? 800 : 600;
                                     }
                                 }
 
@@ -584,20 +643,20 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                     field-font-size: 14px;
                                     placeholder: "Cheat name (e.g. Infinite Health)";
                                     text: c.label;
-                                    highlighted: root.focused-index == i + 9 && root.sub-index == 0;
+                                    highlighted: root.focused-index == i + 11 && root.sub-index == 0;
                                     edited => { root.cheat-label-changed(c.id, self.text); }
                                 }
 
                                 RecordButton {
                                     width: 170px;
                                     label: c.key;
-                                    highlighted: root.focused-index == i + 9 && root.sub-index == 1;
+                                    highlighted: root.focused-index == i + 11 && root.sub-index == 1;
                                     clicked => { root.record-cheat(c.id); }
                                 }
 
                                 IconButton {
                                     icon: @image-url("../../assets/images/icons/close.svg");
-                                    icon-size: (root.focused-index == i + 9 && root.sub-index == 2) ? 18px : 14px;
+                                    icon-size: (root.focused-index == i + 11 && root.sub-index == 2) ? 18px : 14px;
                                     button-size: 36px;
                                     icon-color: Theme.danger;
                                     tooltip-text: "Remove cheat";
@@ -644,9 +703,9 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                             alignment: center;
                             Text {
                                 text: "Cancel";
-                                color: (root.focused-index == 9 + root.cheats.length && root.sub-index == 0) ? Theme.accent : Theme.text;
+                                color: (root.focused-index == 11 + root.cheats.length && root.sub-index == 0) ? Theme.accent : Theme.text;
                                 font-size: 15px;
-                                font-weight: (root.focused-index == 9 + root.cheats.length && root.sub-index == 0) ? 800 : 600;
+                                font-weight: (root.focused-index == 11 + root.cheats.length && root.sub-index == 0) ? 800 : 600;
                             }
                         }
 
@@ -667,7 +726,7 @@ export component AddEditTrainerModal inherits ModalBackdrop {
                                 text: root.save-label;
                                 color: Theme.on-accent;
                                 font-size: 15px;
-                                font-weight: (root.focused-index == 9 + root.cheats.length && root.sub-index == 1) ? 900 : 700;
+                                font-weight: (root.focused-index == 11 + root.cheats.length && root.sub-index == 1) ? 900 : 700;
                             }
                         }
 

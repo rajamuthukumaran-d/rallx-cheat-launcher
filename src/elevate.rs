@@ -225,7 +225,10 @@ mod tests {
 
     #[test]
     fn startup_elevation_needs_the_setting_and_an_unelevated_process() {
-        let mut config = AppConfig::default();
+        let mut config = AppConfig {
+            run_as_admin: false,
+            ..AppConfig::default()
+        };
         assert!(!wants_startup_elevation(&config));
 
         config.run_as_admin = true;

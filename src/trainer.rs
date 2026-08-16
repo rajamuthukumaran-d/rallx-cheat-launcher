@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use crate::config::TrainerConfig;
+use crate::config::{LaunchScriptConfig, TrainerConfig};
 use crate::exe_version;
 
 #[derive(Debug)]
@@ -556,6 +556,13 @@ pub fn wait_for_watched_exe_exit(
     }
 }
 
+/// Returns whether an instance of this exact executable is currently running.
+/// The full path is compared, so two unrelated games with the same executable
+/// filename cannot select each other's trainer.
+pub fn watched_exe_is_running(watched_exe: &Path) -> Result<bool, std::io::Error> {
+    process_path_is_running(&watched_exe.canonicalize()?)
+}
+
 fn process_path_is_running(watched_exe: &Path) -> Result<bool, std::io::Error> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use windows::Win32::Foundation::HANDLE;
@@ -770,12 +777,11 @@ pub fn sync_trainer_configs(
                 filename: info.filename,
                 version,
                 size_bytes: info.size_bytes,
-                game_exe: None,
-                game_args: None,
+                launch_script: LaunchScriptConfig::default(),
                 watched_exe: None,
-                launch_shortcut: None,
+                auto_trigger_cheats: crate::config::DEFAULT_AUTO_TRIGGER_CHEATS,
+                cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
                 default_cheats: Vec::new(),
-                close_after_launch: false,
             });
         }
     }
@@ -983,15 +989,19 @@ mod tests {
             filename: "trainer.exe".to_string(),
             version: "1.2.3".to_string(),
             size_bytes: 0,
-            game_exe: Some("Game.exe".to_string()),
-            game_args: None,
+            launch_script: LaunchScriptConfig {
+                game_exe: Some("Game.exe".to_string()),
+                game_args: None,
+                launch_shortcut: Some("Ctrl+F1".to_string()),
+                close_after_launch: true,
+            },
             watched_exe: Some("C:\\Games\\Game.exe".to_string()),
-            launch_shortcut: Some("Ctrl+F1".to_string()),
+            auto_trigger_cheats: false,
+            cheat_delay_ms: 1_500,
             default_cheats: vec![crate::config::CheatConfig {
                 label: "Infinite Health".to_string(),
                 key: "Numpad1".to_string(),
             }],
-            close_after_launch: true,
         }];
 
         let synced = sync_trainer_configs(&existing, &dir).unwrap();
@@ -1000,12 +1010,17 @@ mod tests {
 
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].name, "My Trainer");
+        assert!(!synced[0].auto_trigger_cheats);
+        assert_eq!(synced[0].cheat_delay_ms, 1_500);
         // Version is re-read from the exe on every sync rather than kept
         // from config - the fixture file has no version resource, so it
         // comes back empty rather than the stale "1.2.3".
         assert_eq!(synced[0].version, "");
         assert_eq!(synced[0].size_bytes, 4);
-        assert_eq!(synced[0].launch_shortcut.as_deref(), Some("Ctrl+F1"));
+        assert_eq!(
+            synced[0].launch_script.launch_shortcut.as_deref(),
+            Some("Ctrl+F1")
+        );
         assert_eq!(
             synced[0].watched_exe.as_deref(),
             Some("C:\\Games\\Game.exe")
@@ -1023,12 +1038,11 @@ mod tests {
             filename: "gone.exe".to_string(),
             version: String::new(),
             size_bytes: 0,
-            game_exe: None,
-            game_args: None,
+            launch_script: LaunchScriptConfig::default(),
             watched_exe: None,
-            launch_shortcut: None,
+            auto_trigger_cheats: crate::config::DEFAULT_AUTO_TRIGGER_CHEATS,
+            cheat_delay_ms: crate::config::DEFAULT_CHEAT_DELAY_MS,
             default_cheats: Vec::new(),
-            close_after_launch: false,
         }];
 
         let synced = sync_trainer_configs(&existing, &dir).unwrap();
@@ -1038,6 +1052,7 @@ mod tests {
         assert_eq!(synced.len(), 1);
         assert_eq!(synced[0].filename, "new-trainer.exe");
         assert_eq!(synced[0].name, "new-trainer");
+        assert!(!synced[0].auto_trigger_cheats);
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {

@@ -35,6 +35,17 @@ fn default_true() -> bool {
     true
 }
 
+pub const DEFAULT_CHEAT_DELAY_MS: u64 = 3_000;
+pub const DEFAULT_AUTO_TRIGGER_CHEATS: bool = false;
+
+fn default_cheat_delay_ms() -> u64 {
+    DEFAULT_CHEAT_DELAY_MS
+}
+
+fn default_auto_trigger_cheats() -> bool {
+    DEFAULT_AUTO_TRIGGER_CHEATS
+}
+
 fn default_launch_shortcut() -> Option<String> {
     Some("Ctrl+Alt+Shift+F3".to_string())
 }
@@ -120,26 +131,41 @@ impl<'de> Deserialize<'de> for CheatConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LaunchScriptConfig {
+    pub game_exe: Option<String>,
+    /// Command line to start `game_exe` with, as taken from a picked .lnk or
+    /// typed by hand. Only ever written into a generated .bat; Rallx itself
+    /// never starts the game.
+    pub game_args: Option<String>,
+    pub launch_shortcut: Option<String>,
+    pub close_after_launch: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TrainerConfig {
     pub name: String,
     pub filename: String, // Filename only, not full path
     pub version: String,
     pub size_bytes: u64,
-    pub game_exe: Option<String>,
-    /// Command line to start `game_exe` with, as taken from a picked .lnk or
-    /// typed by hand. Only ever written into a generated .bat - Rallx itself
-    /// never starts the game. `default` because configs predate the field.
-    #[serde(default)]
-    pub game_args: Option<String>,
-    /// Executable whose lifetime controls cleanup for this trainer. Once a
-    /// process with this executable name has been seen and then exits, Rallx
-    /// terminates the trainer it launched and exits too.
+    #[serde(rename = "launchScript")]
+    pub launch_script: LaunchScriptConfig,
+    /// Executable used to match the running game when the global shortcut is
+    /// pressed. Its lifetime also controls cleanup: once this exact executable
+    /// has been seen and then exits, Rallx terminates the trainer it launched.
+    /// Rallx itself exits afterward only in launch-option background mode.
     #[serde(default)]
     pub watched_exe: Option<String>,
-    pub launch_shortcut: Option<String>,
+    /// Whether the first action that launches this trainer also sends its
+    /// default cheats. When disabled, a later hotkey/action against the
+    /// already-running trainer sends them instead.
+    #[serde(default = "default_auto_trigger_cheats")]
+    pub auto_trigger_cheats: bool,
+    /// Extra time after the trainer reports that its UI is ready before the
+    /// launch-time default cheats are sent.
+    #[serde(default = "default_cheat_delay_ms")]
+    pub cheat_delay_ms: u64,
     pub default_cheats: Vec<CheatConfig>,
-    pub close_after_launch: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -150,14 +176,17 @@ pub struct AppConfig {
     pub default_shortcut: Option<String>,
     #[serde(default)]
     pub theme: ThemeConfig,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub close_after_launch_global: bool,
     #[serde(default = "default_true")]
     pub confirm_exit: bool,
-    /// Whether startup should hand off to an elevated copy of the app. Off by
-    /// default: elevation is only needed to reach trainers that run elevated
-    /// themselves, and it costs a UAC prompt every launch.
+    /// Normal windowed mode starts hidden in the system tray and keeps its
+    /// global running-game hotkey active. This is separate from CLI
+    /// launch-option background mode, which targets one configured trainer.
     #[serde(default)]
+    pub run_in_background: bool,
+    /// Whether startup should hand off to an elevated copy of the app.
+    #[serde(default = "default_true")]
     pub run_as_admin: bool,
     #[serde(default)]
     pub trainers: Vec<TrainerConfig>,
@@ -169,9 +198,10 @@ impl Default for AppConfig {
             trainer_folder: None,
             default_shortcut: default_launch_shortcut(),
             theme: ThemeConfig::default(),
-            close_after_launch_global: true,
+            close_after_launch_global: false,
             confirm_exit: true,
-            run_as_admin: false,
+            run_in_background: false,
+            run_as_admin: true,
             trainers: Vec::new(),
         }
     }
@@ -255,15 +285,14 @@ mod tests {
         let config: AppConfig =
             serde_json::from_str(r#"{"trainer_folder":"C:\\trainers"}"#).expect("parses");
         assert_eq!(config.trainer_folder, Some(PathBuf::from("C:\\trainers")));
-        assert!(config.close_after_launch_global);
+        assert!(!config.close_after_launch_global);
         assert!(config.confirm_exit);
+        assert!(!config.run_in_background);
         assert_eq!(
             config.default_shortcut.as_deref(),
             Some("Ctrl+Alt+Shift+F3")
         );
-        // Elevation is opt-in, so a config written before the setting existed
-        // must not start prompting for UAC on the next launch.
-        assert!(!config.run_as_admin);
+        assert!(config.run_as_admin);
         assert_eq!(config.theme.accent, "#5b8cff");
     }
 
@@ -271,9 +300,10 @@ mod tests {
     fn settings_survive_a_save_load_roundtrip() {
         let mut config = AppConfig {
             default_shortcut: Some("Ctrl + F12".to_string()),
-            close_after_launch_global: false,
+            close_after_launch_global: true,
             confirm_exit: false,
-            run_as_admin: true,
+            run_in_background: true,
+            run_as_admin: false,
             ..AppConfig::default()
         };
         config.theme.accent = "#ff9f5b".to_string();
@@ -284,16 +314,17 @@ mod tests {
         let loaded: AppConfig = serde_json::from_str(&json).expect("parses");
 
         assert_eq!(loaded.default_shortcut.as_deref(), Some("Ctrl + F12"));
-        assert!(!loaded.close_after_launch_global);
+        assert!(loaded.close_after_launch_global);
         assert!(!loaded.confirm_exit);
-        assert!(loaded.run_as_admin);
+        assert!(loaded.run_in_background);
+        assert!(!loaded.run_as_admin);
         assert_eq!(loaded.theme.accent_rgb(), (0xff, 0x9f, 0x5b));
         assert!(!loaded.theme.is_dark());
         assert!(loaded.theme.is_compact());
     }
 
     #[test]
-    fn older_trainer_configs_default_to_no_watched_executable() {
+    fn missing_watched_executable_defaults_to_none() {
         let config: AppConfig = serde_json::from_str(
             r#"{
                 "trainers": [{
@@ -301,15 +332,50 @@ mod tests {
                     "filename": "trainer.exe",
                     "version": "1.0",
                     "size_bytes": 1,
-                    "game_exe": null,
-                    "launch_shortcut": null,
-                    "default_cheats": [],
-                    "close_after_launch": false
+                    "launchScript": {
+                        "game_exe": null,
+                        "game_args": null,
+                        "launch_shortcut": null,
+                        "close_after_launch": false
+                    },
+                    "default_cheats": []
                 }]
             }"#,
         )
         .expect("parses");
 
         assert_eq!(config.trainers[0].watched_exe, None);
+        assert!(!config.trainers[0].auto_trigger_cheats);
+        assert_eq!(config.trainers[0].cheat_delay_ms, DEFAULT_CHEAT_DELAY_MS);
+    }
+
+    #[test]
+    fn launch_script_fields_serialize_under_one_camel_case_object() {
+        let trainer = TrainerConfig {
+            name: "Trainer".to_string(),
+            filename: "trainer.exe".to_string(),
+            version: "1.0".to_string(),
+            size_bytes: 1,
+            launch_script: LaunchScriptConfig {
+                game_exe: Some("C:\\Games\\Game.exe".to_string()),
+                game_args: Some("-windowed".to_string()),
+                launch_shortcut: Some("Insert".to_string()),
+                close_after_launch: true,
+            },
+            watched_exe: None,
+            auto_trigger_cheats: true,
+            cheat_delay_ms: DEFAULT_CHEAT_DELAY_MS,
+            default_cheats: Vec::new(),
+        };
+
+        let json = serde_json::to_value(trainer).expect("serializes");
+        let launch_script = json.get("launchScript").expect("nested object");
+
+        assert_eq!(launch_script["game_exe"], "C:\\Games\\Game.exe");
+        assert_eq!(launch_script["game_args"], "-windowed");
+        assert_eq!(launch_script["launch_shortcut"], "Insert");
+        assert_eq!(launch_script["close_after_launch"], true);
+        assert!(json.get("game_exe").is_none());
+        assert!(json.get("launch_shortcut").is_none());
     }
 }

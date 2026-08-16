@@ -57,18 +57,19 @@ component SectionLabel inherits Text {
 export component SettingsScreen inherits Rectangle {
     in property <string> folder-path;
     in property <string> default-shortcut-label;
-    in-out property <bool> close-after-launch: true;
+    in-out property <bool> run-in-background: false;
+    in-out property <bool> close-after-launch: false;
     in-out property <bool> confirm-exit: true;
-    in-out property <bool> run-as-admin: false;
+    in-out property <bool> run-as-admin: true;
     // Whether *this* process is elevated, which is decided at startup and can't
     // change while it runs - so the restart button is pointless once it's true.
     in property <bool> is-elevated: false;
     // Gamepad focus target; -1 means nothing focused. Rows are: 0 trainer
-    // folder, 1 default shortcut, 2 close-after-launch, 3 confirm-exit,
-    // 4 run-as-admin, 5 restart-as-admin, 6 accent color, 7 background,
-    // 8 row style. Must stay in sync with AppWindow's settings-item-count()/
+    // folder, 1 default shortcut, 2 run-in-background, 3 close-after-launch,
+    // 4 confirm-exit, 5 run-as-admin, 6 restart-as-admin, 7 accent color,
+    // 8 background, 9 row style. Must stay in sync with AppWindow's settings-item-count()/
     // activate-settings-focused()/move-settings-value, which drive this from
-    // D-Pad/A/B input (left/right cycle rows 6-8 in place rather than moving
+    // D-Pad/A/B input (left/right cycle rows 7-9 in place rather than moving
     // focus further).
     in property <int> focused-index: -1;
 
@@ -218,12 +219,47 @@ export component SettingsScreen inherits Rectangle {
                             padding-bottom: 10px;
                             cross-axis-alignment: center;
 
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 3px;
+                                alignment: center;
+
+                                Text {
+                                    text: "Run in background";
+                                    color: root.focused-index == 2 ? Theme.accent : Theme.text;
+                                    font-size: 16px;
+                                    font-weight: root.focused-index == 2 ? 800 : 600;
+                                }
+                                Text {
+                                    text: "Start in the system tray and keep listening for the global running-game shortcut. Minimizing Rallx also sends it to the tray.";
+                                    color: Theme.text-dim;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            ToggleSwitch {
+                                track-width: 46px;
+                                track-height: 26px;
+                                checked <=> root.run-in-background;
+                            }
+                        }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            cross-axis-alignment: center;
+
                             Text {
                                 horizontal-stretch: 1;
                                 text: "Close app after launching trainer";
-                                color: root.focused-index == 2 ? Theme.accent : Theme.text;
+                                color: root.focused-index == 3 ? Theme.accent : Theme.text;
                                 font-size: 16px;
-                                font-weight: root.focused-index == 2 ? 800 : 600;
+                                font-weight: root.focused-index == 3 ? 800 : 600;
                                 vertical-alignment: center;
                             }
 
@@ -250,9 +286,9 @@ export component SettingsScreen inherits Rectangle {
 
                                 Text {
                                     text: "Confirm before closing app";
-                                    color: root.focused-index == 3 ? Theme.accent : Theme.text;
+                                    color: root.focused-index == 4 ? Theme.accent : Theme.text;
                                     font-size: 16px;
-                                    font-weight: root.focused-index == 3 ? 800 : 600;
+                                    font-weight: root.focused-index == 4 ? 800 : 600;
                                 }
                             }
 
@@ -279,9 +315,9 @@ export component SettingsScreen inherits Rectangle {
 
                                 Text {
                                     text: "Run as administrator";
-                                    color: root.focused-index == 4 ? Theme.accent : Theme.text;
+                                    color: root.focused-index == 5 ? Theme.accent : Theme.text;
                                     font-size: 16px;
-                                    font-weight: root.focused-index == 4 ? 800 : 600;
+                                    font-weight: root.focused-index == 5 ? 800 : 600;
                                 }
                                 Text {
                                     text: "Windows blocks key presses sent to an elevated trainer, so default cheats only reach one when this app is elevated too. Takes effect the next time the app starts.";
@@ -314,9 +350,9 @@ export component SettingsScreen inherits Rectangle {
 
                                 Text {
                                     text: "Administrator rights";
-                                    color: root.focused-index == 5 ? Theme.accent : Theme.text;
+                                    color: root.focused-index == 6 ? Theme.accent : Theme.text;
                                     font-size: 16px;
-                                    font-weight: root.focused-index == 5 ? 800 : 600;
+                                    font-weight: root.focused-index == 6 ? 800 : 600;
                                 }
                                 Text {
                                     text: root.is-elevated
@@ -332,7 +368,7 @@ export component SettingsScreen inherits Rectangle {
                                 label: root.is-elevated ? "Elevated" : "Restart as admin";
                                 min-w: 150px;
                                 enabled: !root.is-elevated;
-                                focused: root.focused-index == 5 && !root.is-elevated;
+                                focused: root.focused-index == 6 && !root.is-elevated;
                                 clicked => { root.restart-as-admin(); }
                             }
                         }
@@ -367,9 +403,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Accent color";
-                                color: root.focused-index == 6 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 7 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 6 ? 800 : 600;
+                                font-weight: root.focused-index == 7 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -407,9 +443,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Background";
-                                color: root.focused-index == 7 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 8 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 7 ? 800 : 600;
+                                font-weight: root.focused-index == 8 ? 800 : 600;
                             }
 
                             HorizontalLayout {
@@ -436,9 +472,9 @@ export component SettingsScreen inherits Rectangle {
 
                             Text {
                                 text: "Row style";
-                                color: root.focused-index == 8 ? Theme.accent : Theme.text-dim;
+                                color: root.focused-index == 9 ? Theme.accent : Theme.text-dim;
                                 font-size: 14px;
-                                font-weight: root.focused-index == 8 ? 800 : 600;
+                                font-weight: root.focused-index == 9 ? 800 : 600;
                             }
 
                             HorizontalLayout {

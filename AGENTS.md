@@ -15,6 +15,44 @@ trainers from a user-selected folder and launches them, optionally auto-pressing
 configured hotkeys. It must work well on handheld gaming PCs (ROG Ally, Steam
 Deck) with touch screen and gamepad input, not just mouse/keyboard.
 
+## Runtime modes
+
+Rallx has exactly two runtime modes. Keep this terminology consistent in code,
+documentation, and user-facing text:
+
+1. **Single trainer mode** is selected by a launch option containing
+   `--launch`. It is a tray-only process dedicated to one configured trainer
+   and its game. Its hotkey resolves in this order: the per-run CLI hotkey, the
+   trainer's saved launch shortcut, then the global default shortcut (subject
+   to `--override`).
+2. **Normal mode** (also called **multi trainer mode**) is the ordinary app.
+   It may have a visible foreground window or be hidden in the system tray by
+   the Settings "Run in background" toggle; those are two presentations of the
+   same mode, not separate runtime modes. Normal mode registers only the global
+   default shortcut and uses the running `watched_exe` to select the matching
+   trainer.
+
+Both modes share this hotkey-triggered launch pipeline:
+
+1. Resolve the trainer and launch it.
+2. Wait until the trainer is ready. If its per-trainer auto-trigger setting is
+   enabled, wait its configured delay and inject its default cheats; otherwise
+   the next hotkey/launch action against the running trainer injects them.
+   Minimize as required by the launch origin.
+3. If `watched_exe` is configured, keep its launched-process handle and close
+   the trainer after the watched game exits. Single trainer mode also exits
+   Rallx after that cleanup; normal mode remains running. Close-after-launch
+   overrides this cleanup as described below.
+4. If close-after-launch is enabled, exit Rallx only after the trainer has
+   opened and the default-cheat sequence has completed. Normal mode uses the
+   global Settings toggle. Single trainer mode uses the per-run
+   `--closeafterlaunch` flag (normally generated from the trainer's saved
+   launch-script setting).
+
+When both `watched_exe` and close-after-launch are enabled, close-after-launch
+takes precedence: inject any default cheats, exit Rallx, and leave the trainer
+running. Do not start watched-executable cleanup in this combination.
+
 ## Tech stack
 
 - **Language:** Rust (stable toolchain)
@@ -46,7 +84,7 @@ Don't add a crate for something Slint or `std` already covers.
 src/
   main.rs           # entry point, tray/background vs windowed startup branch
   launch_args.rs    # CLI launch-option parsing + launch-script generation
-  background.rs     # tray mode: option -> config resolution, hotkey/tray loop
+  background.rs     # single trainer mode: option resolution, hotkey/tray loop
   config.rs         # config.json schema + load/save
   trainer.rs        # trainer discovery, launch, file import
   elevate.rs        # elevation check + relaunching the app itself via "runas"
@@ -83,23 +121,44 @@ silently violate a requirement from another section.)
   RB=copy launch script, Start=settings); "close after launching" checkbox.
 - **Settings screen:** trainer folder picker, default launch shortcut, theme
   (accent/background/style), global "close app after launching trainer",
+  normal-mode "run in background" (start hidden in the tray and minimize to
+  tray while retaining the global running-game hotkey; this remains normal
+  mode and is separate from single trainer mode),
   "run as administrator" (applied at next startup) plus a restart-elevated
-  button that is disabled once the process is already elevated.
+  button that is disabled once the process is already elevated. Defaults are:
+  run in background off, close after launch off, confirm before closing on,
+  and run as administrator on.
 - **Add/Edit trainer popup:** triggered by drag-drop of an exe or the add icon;
   editable name, exe picker, launch shortcut assignment, list of default cheats
-  (key/key-combo) entered via a record button that captures live key input.
+  (key/key-combo) entered via a record button that captures live key input. A
+  per-trainer auto-trigger toggle defaults off and reveals a delay field (the
+  existing three-second grace period is the default); when off, the first
+  launch skips cheats and the next trigger action sends them. A
+  watched executable closes the launched trainer when it exits; Rallx itself
+  then exits only in single trainer mode, not normal mode. When
+  close-after-launch is enabled, it overrides watched cleanup and leaves the
+  trainer running.
 - **Trainer launching:** click/play/A-button launches the trainer executable,
   resolved relative to the configured trainer folder (trainers are referenced
-  by filename only, never full path).
-- **Launch-option / background mode:** CLI args like
+  by filename only, never full path). Normal UI and global-hotkey launches wait
+  for readiness and inject saved default cheats; only a fresh hotkey-triggered
+  launch with cheats minimizes the trainer. Retained process state prevents
+  repeated hotkeys from launching duplicates, and close-after-launch runs only
+  after cheat injection finishes.
+- **Single trainer mode:** CLI args like
   `--launch="rdr2-trainer.exe" --hotkey="insert" --defaultcheat="ctrl+num1,num3,ctrl+num5"`.
   Only `--launch` is required — omitted values fall back to that trainer's
   saved shortcut/cheats (then the global default shortcut), so the other flags
   are per-run overrides. `--override` suppresses those fallbacks and takes the
   hotkey and cheats from the command line alone.
-  When launched with these args, the app must **not** show its window — it runs
-  as a tray-only background process, waits for the hotkey, then launches the
-  trainer and injects the default cheat keys.
+  When launched with these args, the app must **not** show its window. It runs
+  as a tray-only process, waits for the resolved hotkey, then follows the shared
+  launch/inject/minimize/cleanup pipeline above for that trainer.
+- **Normal / multi trainer mode:** foreground and Settings-driven background
+  operation share the same global shortcut. On press, match a running
+  `watched_exe`, launch that trainer, and follow the same
+  launch/inject/minimize/cleanup pipeline without exiting after watched-game
+  cleanup.
 - **Drag & drop:** dropping an exe onto the app opens the Add Trainer popup;
   confirming moves the file into the trainer folder.
 - **Close-after-launch precedence:** the global Settings toggle is the single
@@ -107,6 +166,8 @@ silently violate a requirement from another section.)
   A per-trainer "close after launch" flag is only used to *generate* the
   `--closeafterlaunch` CLI flag for a launch script — it must never by itself
   close the app when launching from the UI.
+  When close-after-launch applies and auto-trigger is disabled, wait for the
+  trainer to open, minimize it, skip default cheats, and exit Rallx.
 
 ## Coding conventions
 
@@ -151,5 +212,7 @@ There is no test suite or CI config yet — if you add one, keep it Windows-only
 - Don't commit anything under `mockups/temp`.
 - Don't build a general plugin/extension system, telemetry, or auto-update
   machinery — out of scope unless requested.
-- Don't silently swallow the launch-option CLI args into the normal UI code
-  path — background/tray mode and windowed mode are distinct startup branches.
+- Don't silently swallow launch-option CLI args into normal-mode UI code.
+  Single trainer mode and normal/multi trainer mode are distinct startup
+  branches; normal mode being hidden in the tray does not make it single
+  trainer mode.
