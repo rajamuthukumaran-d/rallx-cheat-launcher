@@ -547,6 +547,7 @@ fn apply_settings_to_ui(app: &AppWindow, config: &AppConfig) {
     app.set_confirm_exit(config.confirm_exit);
     app.set_run_in_background(config.run_in_background);
     app.set_start_on_login(config.start_on_login);
+    app.set_launch_fullscreen(config.launch_fullscreen);
     app.set_run_as_admin(config.run_as_admin);
     app.set_default_shortcut_label(
         config
@@ -571,6 +572,7 @@ fn persist_settings_from_ui(app: &AppWindow, state: &AppState) {
     config.confirm_exit = app.get_confirm_exit();
     config.run_in_background = app.get_run_in_background();
     config.start_on_login = app.get_start_on_login();
+    config.launch_fullscreen = app.get_launch_fullscreen();
     config.run_as_admin = app.get_run_as_admin();
     config.default_shortcut = match app.get_default_shortcut_label().as_str() {
         "" | NOT_SET => None,

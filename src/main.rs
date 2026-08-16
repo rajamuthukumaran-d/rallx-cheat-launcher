@@ -281,11 +281,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instance = Rc::new(instance);
 
     let start_in_background = config.run_in_background;
+    let launch_fullscreen = config.launch_fullscreen;
     let app = create_window()?;
+    app.window().set_fullscreen(launch_fullscreen);
+    app.set_fullscreen_active(launch_fullscreen);
 
     app_state::wire(&app, config, app_state::AppMode::Windowed);
     let tray = WindowedTrayIcon::new()?;
     let window_features_started = Rc::new(Cell::new(false));
+    let taskbar_fullscreen_minimized = Rc::new(Cell::new(false));
 
     {
         let app_weak = app.as_weak();
@@ -314,6 +318,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 dialog::error(&format!("Could not update the system tray icon: {err}"));
             }
         });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let taskbar_fullscreen_minimized = taskbar_fullscreen_minimized.clone();
+        app.on_fullscreen_changed(move |enabled| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            taskbar_fullscreen_minimized.set(false);
+            app.window().set_minimized(false);
+            app.window().set_fullscreen(enabled);
+            app.set_fullscreen_active(enabled);
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let taskbar_fullscreen_minimized = taskbar_fullscreen_minimized.clone();
+        app.on_minimize_app(move || {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if app.get_run_in_background() {
+                app.window().set_minimized(false);
+                if let Err(err) = app.hide() {
+                    dialog::error(&format!("Could not hide Rallx in the system tray: {err}"));
+                }
+            } else if app.get_fullscreen_active() {
+                app.window().set_fullscreen(false);
+                let app_weak = app.as_weak();
+                let taskbar_fullscreen_minimized = taskbar_fullscreen_minimized.clone();
+                slint::Timer::single_shot(Duration::from_millis(100), move || {
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
+                    app.window().set_minimized(true);
+                    taskbar_fullscreen_minimized.set(true);
+                });
+            } else {
+                app.window().set_minimized(true);
+            }
+        });
+    }
+
+    let fullscreen_restore_timer = slint::Timer::default();
+    {
+        let app_weak = app.as_weak();
+        let taskbar_fullscreen_minimized = taskbar_fullscreen_minimized.clone();
+        fullscreen_restore_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(50),
+            move || {
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                if taskbar_fullscreen_minimized.get() && !app.window().is_minimized() {
+                    taskbar_fullscreen_minimized.set(false);
+                    app.window().set_fullscreen(true);
+                }
+            },
+        );
     }
 
     // run_event_loop_until_quit is deliberate: once minimized, no app window
@@ -390,6 +456,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let _ = app.hide();
     drop(activation_timer);
+    drop(fullscreen_restore_timer);
     drop(minimize_timer);
     drop(tray);
     drop(app);

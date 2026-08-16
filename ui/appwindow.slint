@@ -38,6 +38,14 @@ export component AppWindow inherits Window {
     in-out property <bool> run-in-background: false;
     // Registers this executable for the current user's Windows login.
     in-out property <bool> start-on-login: false;
+    // Shows the normal app in borderless fullscreen mode and persists that
+    // mode for its next launch.
+    in-out property <bool> launch-fullscreen: false;
+    // Tracks the native mode separately so the Home controls follow the actual
+    // window transition rather than getting ahead of it.
+    in-out property <bool> fullscreen-active: false;
+    in-out property <bool> show-window-menu: false;
+    in-out property <int> window-menu-index: 0;
     // Persisted intent to start elevated; only takes effect on the next
     // startup, since a running process's integrity level is fixed. is-elevated
     // is what this process actually got, set once by Rust at wire-up.
@@ -163,8 +171,8 @@ export component AppWindow inherits Window {
         }
     }
 
-    // True while any popup (key recorder, add/edit form, delete confirm) is
-    // on top of the screen - gamepad actions that act on background state
+    // True while any popup or window-action menu is on top of the screen -
+    // gamepad actions that act on background state
     // (list navigation, edit/delete/copy, search, settings) must no-op so a
     // popup press can't leak through to whatever is behind it.
     // Public so the drag-and-drop handler in Rust can ignore a drop that lands
@@ -176,17 +184,17 @@ export component AppWindow inherits Window {
     // popup-open() minus the keyboard itself, for the few actions (namely Y/
     // open-search-keyboard) that need to run *while* the keyboard is open.
     function other-popup-open() -> bool {
-        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0 || root.show-quit-confirm;
+        return root.recording || root.show-add-edit || root.delete-confirm-id >= 0 || root.show-quit-confirm || root.show-window-menu;
     }
 
     // Keep in sync with SettingsScreen's control layout: trainer folder,
     // default shortcut, run-in-background, start-on-login,
     // close-after-launch, confirm-before-close, run-as-admin,
-    // restart-as-admin, accent color, background, row style -
+    // restart-as-admin, launch-fullscreen, accent color, background, row style -
     // each a single up/down stop; accent/background/row-style are then cycled
     // in place with left/right (see move-settings-value).
     function settings-item-count() -> int {
-        return 11;
+        return 12;
     }
 
     // Slint's imperative `for` has no index binding (only the declarative
@@ -230,11 +238,11 @@ export component AppWindow inherits Window {
     }
 
     function move-settings-value(delta: int) {
-        if root.settings-focused-index == 8 {
+        if root.settings-focused-index == 9 {
             root.cycle-accent(delta);
-        } else if root.settings-focused-index == 9 {
-            root.set-dark-theme(!Theme.dark);
         } else if root.settings-focused-index == 10 {
+            root.set-dark-theme(!Theme.dark);
+        } else if root.settings-focused-index == 11 {
             root.set-compact-rows(!Theme.compact);
         }
     }
@@ -390,10 +398,11 @@ export component AppWindow inherits Window {
         root.move-form-selection(delta);
     }
 
-    // Home screen header has 4 stops: Search, Refresh, Add, Settings.
+    // Home screen header has Search, Refresh, Add, Settings, and a final
+    // fullscreen-only window-actions stop.
     // Keep in sync with activate-home-header() and HomeScreen's layout.
     function move-home-header(delta: int) {
-        root.home-header-index = max(0, min(root.home-header-index + delta, 3));
+        root.home-header-index = max(0, min(root.home-header-index + delta, root.fullscreen-active ? 4 : 3));
     }
 
     function move-keyboard-vertical(delta: int) {
@@ -422,9 +431,13 @@ export component AppWindow inherits Window {
     // Left/right: cycles the focused settings row's value, moves between
     // fields/buttons within the add/edit form's focused row, moves between
     // the Cancel/Confirm buttons of whichever confirm-style popup is on top,
-    // moves between header buttons on the home screen, or moves across the
-    // virtual keyboard's key grid.
+    // moves between header buttons on the home screen, selects a window menu
+    // action, or moves across the virtual keyboard's key grid.
     public function move-horizontal(delta: int) {
+        if root.show-window-menu {
+            root.window-menu-index = max(0, min(root.window-menu-index + delta, 1));
+            return;
+        }
         if root.show-keyboard {
             root.move-keyboard-horizontal(delta);
             return;
@@ -452,6 +465,10 @@ export component AppWindow inherits Window {
         // behind it. The key recorder and delete confirm have nothing to
         // navigate, so they still block navigation entirely; the add/edit
         // form is itself navigable, so it's handled instead of blocked.
+        if root.show-window-menu {
+            root.window-menu-index = max(0, min(root.window-menu-index + delta, 1));
+            return;
+        }
         if root.show-keyboard {
             root.move-keyboard-vertical(delta);
             return;
@@ -745,6 +762,33 @@ export component AppWindow inherits Window {
             root.request-add();
         } else if root.home-header-index == 3 {
             root.open-settings-view();
+        } else if root.home-header-index == 4 && root.fullscreen-active {
+            root.open-window-actions();
+        }
+    }
+
+    function open-window-actions() {
+        root.window-menu-index = 0;
+        root.show-window-menu = true;
+    }
+
+    function close-window-actions() {
+        root.show-window-menu = false;
+        root.window-menu-index = 0;
+    }
+
+    function minimize-window() {
+        root.close-window-actions();
+        root.minimize-app();
+    }
+
+    function request-app-close() {
+        root.close-window-actions();
+        if root.confirm-exit {
+            root.confirm-popup-index = 1;
+            root.show-quit-confirm = true;
+        } else {
+            root.quit-app();
         }
     }
 
@@ -790,7 +834,7 @@ export component AppWindow inherits Window {
     }
 
     // Maps settings-focused-index to whichever control it represents. Rows
-    // 8-10 (accent/background/row-style) are cycled with left/right instead -
+    // 9-11 (accent/background/row-style) are cycled with left/right instead -
     // see move-settings-value - so A is a no-op there.
     function activate-settings-focused() {
         if root.settings-focused-index == 0 {
@@ -809,6 +853,8 @@ export component AppWindow inherits Window {
             root.run-as-admin = !root.run-as-admin;
         } else if root.settings-focused-index == 7 && !root.is-elevated {
             root.restart-as-admin();
+        } else if root.settings-focused-index == 8 {
+            root.launch-fullscreen = !root.launch-fullscreen;
         }
     }
 
@@ -963,18 +1009,24 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Dispatches A/Return to whichever popup is currently on top - the
-    // virtual keyboard (which can itself be layered over the add/edit form),
-    // then the quit confirmation, then the key recorder, then add/edit form,
-    // then delete confirm - falling back to the home screen's header/list
-    // when nothing is open. For the three Cancel/Confirm popups, A applies
+    // Dispatches A/Return to whichever popup is currently on top - the window
+    // menu, virtual keyboard (which can itself be layered over the add/edit
+    // form), quit confirmation, key recorder, add/edit form, then delete
+    // confirm - falling back to the home screen's header/list when nothing is
+    // open. For the three Cancel/Confirm popups, A applies
     // whichever button confirm-popup-index is currently on rather than
     // always confirming - left/right (move-horizontal) moves it. via-gamepad
     // is false when this came from HomeScreen's physical-Return handler
     // (which keeps real keyboard focus even under the add/edit form), so the
     // virtual keyboard only ever opens for an actual gamepad A press.
     public function gamepad-accept(via-gamepad: bool) {
-        if root.show-keyboard {
+        if root.show-window-menu {
+            if root.window-menu-index == 0 {
+                root.minimize-window();
+            } else {
+                root.request-app-close();
+            }
+        } else if root.show-keyboard {
             root.activate-keyboard-key();
         } else if root.show-quit-confirm {
             root.close-quit-confirm(root.confirm-popup-index == 1);
@@ -1018,7 +1070,9 @@ export component AppWindow inherits Window {
     // cancels regardless of confirm-popup-index - it's a dedicated cancel
     // button.
     public function gamepad-cancel() {
-        if root.show-keyboard {
+        if root.show-window-menu {
+            root.close-window-actions();
+        } else if root.show-keyboard {
             root.close-keyboard();
         } else if root.show-quit-confirm {
             root.close-quit-confirm(false);
@@ -1032,14 +1086,13 @@ export component AppWindow inherits Window {
             root.go-home();
         } else if root.show-search {
             root.toggle-search();
-        } else if root.confirm-exit {
-            root.show-quit-confirm = true;
         } else {
-            root.quit-app();
+            root.request-app-close();
         }
     }
 
     callback quit-app();
+    callback minimize-app();
     callback copy-script(int);
     callback request-delete(int);
     callback confirm-delete(int);
@@ -1070,6 +1123,8 @@ export component AppWindow inherits Window {
     // Lets normal windowed startup show or hide its tray icon immediately when
     // the setting changes. CLI launch-option mode does not subscribe to this.
     callback run-in-background-changed(bool);
+    // Applies the persisted Appearance choice to the current normal window.
+    callback fullscreen-changed(bool);
     // Applies the Windows login registration. Kept separate from ordinary
     // config persistence because changing it can fail and must be rolled back.
     callback login-startup-changed(bool, bool);
@@ -1167,6 +1222,9 @@ export component AppWindow inherits Window {
             focused-index <=> root.focused-index;
             header-focused: root.home-header-focused;
             header-index: root.home-header-index;
+            fullscreen-active: root.fullscreen-active;
+            show-window-menu: root.show-window-menu;
+            window-menu-index: root.window-menu-index;
             empty-action-focused: root.empty-action-focused;
             has-trainer-folder: root.has-trainer-folder;
             visible-trainers: root.visible-trainers;
@@ -1176,6 +1234,10 @@ export component AppWindow inherits Window {
             open-add => { root.request-add(); }
             select-folder => { root.browse-folder(); }
             open-settings => { root.open-settings-view(); }
+            open-window-menu => { root.open-window-actions(); }
+            close-window-menu => { root.close-window-actions(); }
+            minimize-window => { root.minimize-window(); }
+            close-window => { root.request-app-close(); }
             refresh => { root.refresh-trainers(); }
             launch-trainer(id) => { root.launch-trainer(id); }
             edit-trainer(id) => { root.open-edit(id); }
@@ -1190,6 +1252,7 @@ export component AppWindow inherits Window {
             default-shortcut-label: root.default-shortcut-label;
             run-in-background <=> root.run-in-background;
             start-on-login <=> root.start-on-login;
+            launch-fullscreen <=> root.launch-fullscreen;
             close-after-launch <=> root.close-after-launch;
             confirm-exit <=> root.confirm-exit;
             run-as-admin <=> root.run-as-admin;
@@ -1320,6 +1383,10 @@ export component AppWindow inherits Window {
         root.run-in-background-changed(root.run-in-background);
     }
     changed start-on-login => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
+    changed launch-fullscreen => {
+        root.settings-changed();
+        root.fullscreen-changed(root.launch-fullscreen);
+    }
     changed run-as-admin => { root.login-startup-changed(root.start-on-login, root.run-as-admin); }
     changed default-shortcut-label => { root.settings-changed(); }
 }
