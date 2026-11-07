@@ -13,7 +13,7 @@ use slint::{ComponentHandle, Timer, TimerMode};
 use crate::config::{AppConfig, DEFAULT_AUTO_TRIGGER_CHEATS, DEFAULT_CHEAT_DELAY_MS};
 use crate::keys::{self, KeyCombo};
 use crate::launch_args::LaunchOptions;
-use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, AppWindow, TrayIcon};
+use crate::{app_state, elevate, gamepad, hotkey, renderer, trainer, wine, AppWindow, TrayIcon};
 
 /// Maximum time to wait for a newly launched trainer's GUI thread to finish
 /// initialization. Programs without a standard GUI queue time out and then
@@ -465,41 +465,56 @@ pub fn run(
     app.window()
         .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
 
-    let tray = TrayIcon::new()?;
-    tray.set_trainer_name(plan.display_name.as_str().into());
+    let tray = match TrayIcon::new() {
+        Ok(tray) => {
+            tray.set_trainer_name(plan.display_name.as_str().into());
 
-    {
-        let app_weak = app.as_weak();
-        let gamepad_started = std::cell::Cell::new(false);
-        tray.on_show_window(move || {
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            if let Err(err) = app.show() {
-                eprintln!("Failed to show the window: {err}");
-                return;
+            {
+                let app_weak = app.as_weak();
+                let gamepad_started = std::cell::Cell::new(false);
+                tray.on_show_window(move || {
+                    let Some(app) = app_weak.upgrade() else {
+                        return;
+                    };
+                    if let Err(err) = app.show() {
+                        eprintln!("Failed to show the window: {err}");
+                        return;
+                    }
+                    // Gamepad polling drives the visible UI only, so it is started on
+                    // the first show instead of costing a thread while in the tray.
+                    if !gamepad_started.replace(true) {
+                        gamepad::spawn_listener(app.as_weak());
+                    }
+                });
             }
-            // Gamepad polling drives the visible UI only, so it is started on
-            // the first show instead of costing a thread while in the tray.
-            if !gamepad_started.replace(true) {
-                gamepad::spawn_listener(app.as_weak());
+
+            {
+                let plan = plan.clone();
+                let state = state.clone();
+                // Clicking the menu item is an explicit request, so it starts the
+                // trainer again even after the hotkey already did once.
+                tray.on_launch_trainer(move || trigger(plan.clone(), state.clone(), true));
             }
-        });
-    }
 
-    {
-        let plan = plan.clone();
-        let state = state.clone();
-        // Clicking the menu item is an explicit request, so it starts the
-        // trainer again even after the hotkey already did once.
-        tray.on_launch_trainer(move || trigger(plan.clone(), state.clone(), true));
-    }
+            tray.on_quit_app(|| {
+                let _ = slint::quit_event_loop();
+            });
 
-    tray.on_quit_app(|| {
-        let _ = slint::quit_event_loop();
-    });
-
-    tray.show()?;
+            match tray.show() {
+                Ok(()) => Some(tray),
+                Err(err) if wine::is_wine() => {
+                    wine::log(&format!("system tray unavailable: {err}"));
+                    None
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(err) if wine::is_wine() => {
+            wine::log(&format!("could not create system tray: {err}"));
+            None
+        }
+        Err(err) => return Err(err.into()),
+    };
 
     // Kept alive for the whole event loop; dropping either would silently stop
     // the hotkey from firing.
@@ -507,6 +522,23 @@ pub fn run(
     let poll_timer = Timer::default();
 
     match plan.hotkey {
+        Some(combo) if wine::is_wine() => {
+            wine::log(&format!(
+                "using Proton hotkey polling for {}",
+                combo.canonical()
+            ));
+            let was_pressed = std::cell::Cell::new(false);
+            let plan = plan.clone();
+            let state = state.clone();
+            poll_timer.start(TimerMode::Repeated, HOTKEY_POLL, move || {
+                let pressed = keys::is_pressed(&combo);
+                if pressed && !was_pressed.replace(true) {
+                    trigger(plan.clone(), state.clone(), false);
+                } else if !pressed {
+                    was_pressed.set(false);
+                }
+            });
+        }
         Some(combo) => {
             let mut manager = hotkey::HotkeyManager::new()?;
             let id = manager.register(&combo)?;

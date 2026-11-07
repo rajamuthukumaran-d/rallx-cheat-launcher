@@ -409,6 +409,16 @@ pub fn wait_until_released(combo: &KeyCombo, timeout: Duration) -> bool {
     }
 }
 
+/// Reads the physical state of every key in a combo. This is used only by the
+/// Wine fallback because registering a Windows global hotkey can succeed in a
+/// prefix without delivering the event through the host Wayland compositor.
+pub fn is_pressed(combo: &KeyCombo) -> bool {
+    combo
+        .virtual_keys()
+        .iter()
+        .all(|vk| unsafe { GetAsyncKeyState(i32::from(*vk)) } < 0)
+}
+
 impl fmt::Display for KeyCombo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.canonical())
