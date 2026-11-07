@@ -28,6 +28,7 @@ mod renderer;
 mod single_instance;
 mod startup;
 mod trainer;
+mod wine;
 
 /// Slint's default renderer fails on some handheld GPU drivers; the software
 /// renderer is the fallback both startup branches share.
@@ -53,6 +54,7 @@ pub fn create_window() -> Result<AppWindow, slint::PlatformError> {
 /// silent - the process just wouldn't appear. Every startup failure on that
 /// branch gets a dialog as well as stderr.
 fn fatal(message: &str, code: i32) -> ! {
+    wine::log(&format!("fatal: {message}"));
     dialog::error(message);
     std::process::exit(code);
 }
@@ -237,6 +239,10 @@ fn bring_window_to_front(app: &AppWindow) -> bool {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if wine::is_wine() {
+        wine::log("Rallx started under Wine/Proton");
+    }
 
     let options = match launch_args::parse(&args) {
         Ok(options) => options,

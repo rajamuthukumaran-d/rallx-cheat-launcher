@@ -71,7 +71,10 @@ pub fn is_elevated() -> bool {
 /// Whether startup should hand off to an elevated copy before doing anything
 /// else.
 pub fn wants_startup_elevation(config: &AppConfig) -> bool {
-    config.run_as_admin && !is_elevated() && std::env::var_os(GUARD_ENV).is_none()
+    config.run_as_admin
+        && !crate::wine::is_wine()
+        && !is_elevated()
+        && std::env::var_os(GUARD_ENV).is_none()
 }
 
 /// Set by the Settings screen's restart button and acted on only once the event
