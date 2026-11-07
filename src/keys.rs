@@ -156,6 +156,7 @@ const VK_CONTROL: u16 = 0x11;
 const VK_SHIFT: u16 = 0x10;
 const VK_MENU: u16 = 0x12;
 const VK_LWIN: u16 = 0x5B;
+const VK_RWIN: u16 = 0x5C;
 
 fn punctuation(c: char) -> Option<&'static str> {
     Some(match c {
@@ -413,10 +414,17 @@ pub fn wait_until_released(combo: &KeyCombo, timeout: Duration) -> bool {
 /// Wine fallback because registering a Windows global hotkey can succeed in a
 /// prefix without delivering the event through the host Wayland compositor.
 pub fn is_pressed(combo: &KeyCombo) -> bool {
-    combo
-        .virtual_keys()
-        .iter()
-        .all(|vk| unsafe { GetAsyncKeyState(i32::from(*vk)) } < 0)
+    matches_pressed_keys(combo, |vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0)
+}
+
+fn matches_pressed_keys(combo: &KeyCombo, mut is_down: impl FnMut(u16) -> bool) -> bool {
+    let modifiers = Modifiers {
+        ctrl: is_down(VK_CONTROL),
+        alt: is_down(VK_MENU),
+        shift: is_down(VK_SHIFT),
+        win: is_down(VK_LWIN) || is_down(VK_RWIN),
+    };
+    modifiers == combo.modifiers && is_down(combo.key.vk)
 }
 
 impl fmt::Display for KeyCombo {
@@ -487,6 +495,49 @@ pub fn press(combo: &KeyCombo) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn polling_requires_the_exact_modifier_combination() {
+        let modifier_keys = [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN];
+        for expected in 0..16 {
+            let combo = KeyCombo {
+                modifiers: Modifiers {
+                    ctrl: expected & 1 != 0,
+                    alt: expected & 2 != 0,
+                    shift: expected & 4 != 0,
+                    win: expected & 8 != 0,
+                },
+                key: parse_key("Insert").unwrap(),
+            };
+            for actual in 0..16 {
+                for key_down in [false, true] {
+                    let matched = matches_pressed_keys(&combo, |vk| {
+                        (vk == combo.key.vk && key_down)
+                            || modifier_keys
+                                .iter()
+                                .enumerate()
+                                .any(|(bit, modifier)| vk == *modifier && actual & (1 << bit) != 0)
+                    });
+                    assert_eq!(
+                        matched,
+                        expected == actual && key_down,
+                        "expected modifiers {expected}, held modifiers {actual}, key down {key_down}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn polling_recognizes_either_windows_key_as_a_modifier() {
+        let plain = parse_combo("Insert").unwrap();
+        let modified = parse_combo("Super+Insert").unwrap();
+        for held in [vec![VK_LWIN], vec![VK_RWIN], vec![VK_LWIN, VK_RWIN]] {
+            let is_down = |vk| vk == plain.key.vk || held.contains(&vk);
+            assert!(!matches_pressed_keys(&plain, is_down));
+            assert!(matches_pressed_keys(&modified, is_down));
+        }
+    }
 
     #[test]
     fn parses_numpad_spellings_to_the_same_key() {
