@@ -305,8 +305,7 @@ pub fn build_game_bat(
     };
 
     // `start ""` (empty title) so the quoted path isn't swallowed as the window
-    // title, and `cd /d "%~dp0"` so the game gets its own folder as the working
-    // directory however the .bat itself was invoked.
+    // title.
     //
     // Shortcut and cheat flags are omitted so background mode falls back to the
     // trainer's saved values. The per-trainer close flag is different: its only
@@ -314,7 +313,6 @@ pub fn build_game_bat(
     format!(
         "{BAT_MARKER}\r\n\
          @echo off\r\n\
-         cd /d \"%~dp0\"\r\n\
          {game_line}\r\n\
          start \"\" \"{launcher}\" --launch=\"{trainer}\"{close_flag}\r\n"
     )
@@ -873,13 +871,12 @@ mod tests {
 
         let lines: Vec<&str> = bat.lines().collect();
         assert_eq!(lines[0], BAT_MARKER);
-        assert_eq!(lines[2], "cd /d \"%~dp0\"");
         assert_eq!(
-            lines[3],
+            lines[2],
             "start \"\" \"C:\\Games\\RDR2\\RDR2.exe\" -dx12 -windowed"
         );
         assert_eq!(
-            lines[4],
+            lines[3],
             "start \"\" \"C:\\Rallx\\rallx-cheat-launcher.exe\" --launch=\"rdr2-trainer.exe\" --closeafterlaunch"
         );
     }
@@ -895,7 +892,7 @@ mod tests {
         );
 
         let lines: Vec<&str> = bat.lines().collect();
-        assert_eq!(lines[3], "start \"\" \"C:\\100%%%% Games\\g.exe\"");
+        assert_eq!(lines[2], "start \"\" \"C:\\100%%%% Games\\g.exe\"");
         assert!(!bat.contains("--closeafterlaunch"));
     }
 
